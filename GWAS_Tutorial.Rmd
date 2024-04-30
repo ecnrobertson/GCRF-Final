@@ -1,0 +1,327 @@
+---
+title: "GWAS_Tutorial"
+author: "Erica Robertson"
+date: "2024-04-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Desktop/GCRF/")
+```
+
+# INTRODUCTION
+Here I will be going through the steps for running a GWAS on single trait. The following steps are a condensed version of the workflow I followed for my own Grey-crowned Rosy Finch project. Information is gathered from online resources and working with collaborators in the Ruegg Lab with more experience with GWAS than I have. I will be using the program GEMMA to run the bulk of the analysis. This program is best downloaded from source, skipping the (much simpler) conda install option. This is because the BSLMM (and maybe MLMM) models do not work on the conda version. Installing conda from source is a fight with only vague instructions. In the future I hope to put more detailed notes on that here. The code that follows is a mix of R and unix. I am performing most of the analysis and file processing through a remote server called Alpine. That code is blocked out as follows:
+
+```{}
+UNIX CODE HERE
+```
+
+Sometimes I include the output from the line of code if it's informative. I'll mark that with a #OUTPUT.
+R code is largely used for processing results. That is show as:
+
+```{r}
+NICELY COLORED R CODE HERE
+```
+
+I like to have it all together in a single R-markdown file so the steps are easy to follow. In many cases the UNIX code is run as a script. If that is so, I will try and note that in the text. Specific scripts used are also available as separate files in this repository so the details of those can be accessed.
+
+I'm starting with vcf files that have been filtered as follows:
+-only biallilic alleles
+-only SNPs
+-fraction of missing genotypes is <25%
+-min allele freq is 0.05
+-max allele freq is .95
+-depth greater than or equal to 4
+
+I worked with samples from 89 individuals, and around 7.3 mil SNPs. Birds were caught in two location, but there is weak population structure. We will also be accounting for relatedness/structure explicitly when running GEMMA.
+
+#PRE-GWAS WORKFLOW
+Here are some additional filtering, etc, steps that I took before starting the GWAS itself.
+
+First off, if you used GATK to call haplotypes, you're data needs to be fixed. This is because certain versions (newer ones) of GATK called missing snps and homozygous reference instead of leaving them as missing. This is an issue as it can bias the data and scew downstream results. To fix this you must manually mark zero depth snps and missing a genotype.
+
+## Marking zero depth as missing
+*INSERT LINES HERE, RAN THIS IN A SCRIPT THAT'S AVAILABLE IN REPOSITORY*
+
+You can check how many SNPs you're working with by running a little line:
+
+```{}
+bcftools stats  data/vcf/all.vcf.gz | less -S
+```
+
+This spits out a bunch of helpful info, and I would recomend also redirecting the output to a .txt file to save for later.
+
+For more details on how to use bcftools see this webpage: https://eriqande.github.io/con-gen-csu/nmfs-bioinf/handling-vcf-files.html#tell-me-about-my-vcf-file
+
+## VQSR filtering
+This is some hardfiltering done to make sure you're working with the highest quality SNPs. The following filtering is based on best practices and it was the Ruegg lab uses.
+
+-filter "QUAL < 30.0" --filter-name "QUAL30" \
+-filter "SOR > 3.0" --filter-name "SOR3" \
+-filter "FS > 60.0" --filter-name "FS60" \
+-filter "MQ < 40.0" --filter-name "MQ40" \
+-filter "QD < 2.0" --filter-name "QD2" \
+-filter "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+-filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8"
+
+Again, this filtering is in a scipt but you're using GATK to filter here. Please do this *after* making zero depth genotypes as missing!
+
+I did the mark 0 depth and this filtering step on each scaffold file separately (so each individuals info for a given scaffold was in one file) and then merged those together to get a single .vcf file with all the data later.
+
+## BEAGLE 4.1 Imputation
+GEMMA can't work on missing data, so you either have to filter out SNPs where any individuals are missing genotypes (which could results in a significant reduction in the number of SNPs you're working with) or you can impute missing genotypes. I went with the later toa void looking info and because I had a high depth and so felt better about the accuracy of the missing genotypes. If I'd had lower quality sequence data I might've opted for more stringent filtering instead...
+
+This BEAGLE imputation was done using the impute.sh script.
+
+```{}
+BEAGLE_JAR="/projects/ericacnr@colostate.edu/mambaforge/envs/bioinf/java/beagle.27Jan18.7e1.jar"
+j=GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr.vcf
+
+java -Xmx180G -jar $BEAGLE_JAR \
+gt="$j" \
+out=GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz \
+nthreads=48
+```
+
+I like to just double check that nothing weird happened by making sure the line number is the same before and after imputation.
+
+```{}
+zcat GCRF.mkdp0_merged_25missing_min.5max.95_depth4.vcf.gz | wc -l
+#OUTPUT
+7487139
+
+zcat GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz | wc -l
+#OUTPUT
+7487139
+```
+
+I do this because in one iteration imputation resulted in duplication of the lines, requiring a bunch of extra steps to get things sorted. If this happens, I've got the code to fix it but maybe best to just try running it again.
+
+## PLINK to make .ped and .map files
+I made a new set of folders for these files to keep them away from the raw .vcf files. I also installed PLINK into the same conda environment as my GEMMA (called GWAS2). These PLINK commands don't need to be run in a script usually, they don't take too long.
+
+```{}
+conda activate GWAS2
+plink --vcf GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz --aec --recode --out ../new_input_files/base_files
+
+#OUTPUT
+PLINK v1.90b6.21 64-bit (19 Oct 2020)          www.cog-genomics.org/plink/1.9/
+(C) 2005-2020 Shaun Purcell, Christopher Chang   GNU General Public License v3
+Logging to ../new_input_files/base_files.log.
+Options in effect:
+  --allow-extra-chr
+  --out ../new_input_files/base_files
+  --recode
+  --vcf GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz
+
+15884 MB RAM detected; reserving 7942 MB for main workspace.
+--vcf: ../new_input_files/base_files-temporary.bed +
+../new_input_files/base_files-temporary.bim +
+../new_input_files/base_files-temporary.fam written.
+7487128 variants loaded from .bim file.
+89 people (0 males, 0 females, 89 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to ../new_input_files/base_files.nosex .
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 89 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+7487128 variants and 89 people pass filters and QC.
+Note: No phenotypes present.
+--recode ped to ../new_input_files/base_files.ped +
+../new_input_files/base_files.map ... done.
+```
+
+# Fixing the .map files
+So with the way my input files are, some stuff has to get changed before moving forward. The first in my .map file (this is the file that has the information for each of the SNPs, careful when you open this!! It'll be really big so always used a head function). The files currently has a . where the snp name is supposed to be. Each snps neads a unique marker, so an easy way to do this is to take the scaffold name from the first column and join it with the snp position info in the last column to make a new rs (snp name) value.
+
+The initial file looks like this:
+```{}
+
+cat base_files.map | head
+#OUTPUT
+Scaffold_1__1_contigs__length_151072562	.	0	751
+Scaffold_1__1_contigs__length_151072562	.	0	2701
+Scaffold_1__1_contigs__length_151072562	.	0	3064
+Scaffold_1__1_contigs__length_151072562	.	0	4683
+Scaffold_1__1_contigs__length_151072562	.	0	4696
+Scaffold_1__1_contigs__length_151072562	.	0	5001
+Scaffold_1__1_contigs__length_151072562	.	0	5009
+```
+
+We're going to restructure it.
+
+```{}
+cat base_files.map | awk '{print$1"\t"$1"."$4"\t"$3"\t"$4}' > GCRF_base_file.map_loc.map
+cat GCRF_base_file.map_loc.map | head
+#OUTPUT
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.751	0	751
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.2701	0	2701
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.3064	0	3064
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.4683	0	4683
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.4696	0	4696
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.5001	0	5001
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.5009	0	5009
+```
+
+The only flaw I've seen downstream with this is that the SNP names end up being super long. I would actually recomend just using the Scaffold_# and then attaching the positions, thus removing all the extra stuff that isn't informative.
+
+## Making the .ped file
+*So right now, the .ped file doesn't have the morphology information in it, and also the populations/family ID in the first column needs to be numerical. I think there is a way you should be able to do this in PLINK but I honestly couldn't figure it out so instead I just made the .ped file in R and imported in back onto Alpine.*
+
+Here I'm importing my morphology data and cleaning it up a bit. The format of a .ped file is 
+FID IID
+
+```{r}
+morpho <- read.csv("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/GWAS input/GCRF_morphology_residuals.csv")
+
+FID_file <- read.table("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/locID_num.txt", header = FALSE, sep = " ", na.strings = c("", "NA"))
+
+FID_file$V3 <- 0
+FID_file$V4 <- 0
+FID_file$V5 <- 0
+#adding the bill_length as the 6th row, skipping tarsus for now
+morpho_ped_file <- data.frame(FID_file, morpho[,c(3:10)])
+write.table(morpho_ped_file, file="~/Desktop/GCRF/GCRF-Present/GenomicPipeline/GWAS input/GCRF_morpho_residuals.txt", row.names=F, col.names=F)
+```
+
+This morphology file now has the first two columns as numerical FID and the IID. Then I added blanks for the next three columns, which represent stuff like sex that I don't have info for. Then I added on a couple columns for morphology. In this case I had a lot of traits I was working with, but we're going to ignore the additional columns and just keep the 6th, which will be the single traits we're focusing on, culmen_end_length.
+
+So first I'll just remove all the " that exist in the imported spreadsheet, and artifact of moving stuff in from R I guess.
+
+```{}
+sed 's/"//g' GCRF_morpho_residuals.txt > GCRF_morpho_clean.txt
+```
+
+Then I cut out just the columns I want. You always want the first 5, and in this case I just wanted the first morphology trait, hence using the 1-6.
+
+```{}
+cut -d ' ' -f 1-6 GCRF_morpho_clean.txt > culmen_end_length
+```
+
+So the format of a .ped file is that the first 6 columns are the info we've discussed, and then the next however many are the genotypes are a location. So these files are incredibly big and should be opened with caution (and a less -S command). Because I'm using this method of creating new .ped files for each morphology, I needed a way to include the genotype data in a simple maner. To accomplish this, I cut out the genotype data from the original .ped file I made with my first PLINK command and saves this as GCRF_base_file_genotypes.txt. So this is basically the original .ped file minus the first 6 columns. I then take the new started .ped file with the morphology and paste the genotype file back on to get a complete .ped file...
+
+```{}
+paste culmen_end_length ../GCRF_base_file_genotypes.txt > culmen_end_length.ped
+
+#checked column numbers for all of these and everything checks out!
+```
+
+This takes some time but works nicely. I always double check the final column number and make sure it matches the original unaltered .ped file.
+
+## PLINK for .bim .bam .fam files
+So once you have a .map file that works and a .ped file that has the appropriate morphology in it, it's time to make the files that GEMMA takes as it's imput. For my workflow I made a single .map file and then separate .ped files for each morphological trait I wanted to run. This seemed like the cleanest way to go about it, although I believe it's possible to have a single .ped file with all the morpho in sequential columns and indicate which morphology to pull. That never worked for me.
+
+Again, not running this in a script:
+
+```{}
+plink --ped culmen_end_length.ped --map GCRF_base_file.map --out culmen_end_length --make-bed --aec --allow-no-sex
+```
+The --aec flag is to "allow extra chromosomes". This is important because it's going to try and read the scaffolds as chromosomes. The program was designed to run on human data so it's not expecting so many chromosomes! Even if you have reorganized you're SNPs to be at a chromosome level before running this, it's best to use this flag and avoide errors. Additionally, there's an --allow-no-sex flag, which basically avoids it throwing an error if you havn't put sex information into the .ped file (I didn't have consistent sex data so I added this in).
+
+You'll get the following output files:
+GCRF_base_file.bed -> binary file with the SNP info, don't try and view this
+GCRF_base_file.bim -> double check this file to make sure it has the correct SNP ID information that you input from the .map file, also be careful opening as it'll be big
+GCRF_base_file.fam -> this has all the individual info and values for the morphology
+
+Alrighty! So once you have all of these files and everything looks good, you're ready to start running GEMMA!
+
+# RUNNING THE GWAS
+## Relatedness Matrix
+So depending on the way you want to structure you're files, you could do this once and always reference it in you're scripts or do it separately for each trait... Kinda personal choice.
+
+The relatedness matrix is kinda the coolest part of using GEMMA for GWAS. This basically makes a files that's a...well... relatedness matrix. You then include this in your GWAS models as a covariant which allows for directly accounting for population structure and relatedness between individual, something that is typically a big issue with GWAS studies. So this step is super important.
+
+Okay so before I get into the line of code though, some notes on how to run GEMMA in Alpine. You'll first need to make sure the dependencies are loaded up. So go ahead and start an acompile and load those modules. Also, load them in this order or they're throw and error.
+
+```{}
+acompile
+module load gcc/10.3.0
+module load openmpi
+```
+
+Next, go ahead an load up you're conda environment with GEMMA in it.
+
+```{}
+conda activate GWAS2
+```
+
+Now, most of the time you're going to be running GEMMA in a script but you'll need to include these things in the top of your script too so I'm just writing them out here. Additionally, you need to tell alpine (i guess) exactly where you downloaded GEMMA so it can find it. So instead of just writing "GEMMA" you have to give it a full path like "/projects/ericacnr@colostate.edu/GEMMA/bin/gemma". You might be able to get around this with something like a symbolic link but I never bothered.
+
+Okay, so the relatedness matrix runs fine outside a script.
+
+```{}
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile GCRF_bill_morpho \
+	-gk 1 -o GCRF_relate
+
+```
+
+The -bfile flag is where you give it your prefix for the .bim .bed .fam files that you made with PLINK before. If your files don't have a consistent prefix, you can explicitly say which file is names which with some additional flags (see the GEMMA manual) but this is the neatest way of doing it. The -gk 1 flag is telling it to run a "centered relatedness matrix" as opposed to a "standardized relatedness matrix". Make your own decision about which is best, I went with 1. The -o gives the prefix for the output file.
+
+What you get when this is done running is an output folder containing a file that's called GCRF_relate.cXX.txt. This is the file that you'll reference in the actual GWAS as a covariant.
+
+So now you have a relatedness matrix! Awesome, you're ready to run an actual GWAS. But what model do I run??
+
+Well there are some things to consider. The basic options are a LMM, BSLMM, and MLMM. The Linear Mixed Model is the straight forward version of a GWAS. It works on a single trait and gives you p-values for each snp based on how significant of an effect that snp has on explaining the variation seen in the trait. This is what you see output as manhattan plots, and it the most straight forward version of a GWAS. It's also really only good as picking up on large effect snps, and you have a lot of issue with multiple testing so you have to be very stringent with you're filtering for significance (ie using a Bonferoni correction). The next option in a Baysian Sparse Linear Mixed Model. This is a cool one that is nice for polygenic traits as it basically does some fancy MCMC stuff and gets effect sizes of different traits. So it's a bit better as finding smaller effect snps, and the output is a bit different. Instead of a p-value you get a Posterior Inclusion Probability (PIP) which is basically the percentage of time a given snp showed up as being relevant in the MCMC models. This is a little more relaxed than the LMM filtering and I've found gives more snps. The last one is a Multivariant Linear Mixed Model. This guy is cool in theory as it kind of does the LMM thing with p-values but taken into account multiple phenotypes at the same time and gives you snps that effects all of the traits. The problem I've found is that it's finicy when setting up the files, super computationally intensive, and the output is tough. I got mine to run and it seemed fine but then the results made no sense (like 1mil significant snps??). So I didn't chase that down and ended up going with just the BSLMM and LMM. Ask yourself what your goals are and what method works best, and read up on what other people have used to answer similar questions if that's an option.
+
+
+## Linear Mixed Models
+So my approach here was to use the same .map file for all of the PLINK commands, but make separate .ped files for each morphological trait. 
+
+Once you have the .bed .bim .fam files for the trait you're working with, and the relatedness matrix, this code is pretty simple.
+
+I ran this in a script although it didn't actually take too long. I believe the script name is lmm.sh or something vague like that. Essentially you want all the usual bash stuff to tell it how many cores and memory, and then also:
+
+```{}
+source ~/.bashrc
+
+set -x
+
+module load gcc/10.3
+module load openmpi
+
+conda activate GWAS2
+```
+
+That way it runs properly. I usually pulled like 4 nodes, 32 tasks per node, and 100G of memory for an hour. This was a bit overkill but I never did my due diligence to see how much it actually takes.
+
+Anyway, the actual command looks something like this:
+
+```{}
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile culmen_end_length -k ../output/relate.cXX.txt -lmm 1 -o culmen_end_length.lmm -w 500000 -s 5000000
+```
+
+Again the -bfile flag it the prefix for the PLINK files. -k gives the location of the relatedness matrix. -lmm 1 is saying run a Wald test. The Wald test assesses the significance of the SNP genotypes in a linear regression model and is used to test the null hypohtesis that the effect size of a genetic variant on the phenotyupic trait is zero (ie. there is no association between the variant and the trait). See the manual for other options. The -w and -s define a sliding window and sliding step for the program to use. I'm not entirely sure what these actually effect, I used this because Marina did. Need to dig into this a bit more.
+
+The output from this test is a primary the .assoc.txt files which has the p-values for each SNP. We'll work with that later...
+
+## Baysian Sparse Linear Mixed Model
+I used the same approach for generating input files. The command is:
+
+```{}
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile culmen_end_length \
+-k ../output/relate_PC.cXX.txt -bslmm 1 -o culmen_end_length.bslmm \
+-w 500000 -s 5000000
+```
+
+The -bslmm 1 flag is using a standard linear BSLMM. There's a bunch of output files for this one but the main on is the .param.txt which has the PIP and effect size values. Other files output are useful for evaluating how well the model ran, and looking at mixing for the MCMC model. I don't know anything about this, but below I'll link a tutorial that gives tons of code for going over it.
+
+# CONCLUSION
+
+Alrighty! Congrats, you've run a GWAS. Now what do you do with all these outputs?? Well, I've got other stuff on my repository for that. Hopefully I'll get around to adding it here too but for now I'll just leave you with what I've written so far.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
