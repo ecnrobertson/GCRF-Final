@@ -1,0 +1,788 @@
+---
+title: "GCRF_GWAS_Notes"
+author: "Erica Robertson"
+date: "2024-04-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Desktop/GCRF/")
+```
+
+```{r, message=F, LIBRARIES}
+library(MASS)
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+library(ggcorrplot)
+library(rstatix)
+library(dplyr)
+```
+
+# INTRODUCTION
+Here's a walk through of the steps I did to run my GWAS analysis on a bunch of morphological traits for Grey-crowned Rosy Finches. This work makes up the first chapter of my dissertation. The notes are a combination of a cleaner tutorial style markdown file I made to share with people in the lab and my actual, messy, notes I wrote while doing the whole workflow. I like to have it all together in a single R-markdown file so the steps are easy to follow. In many cases the UNIX code is run as a script. If that is so, I will try and note that in the text. Also, I will be breaking up the actually steps into separate files so that all the redundant code doesn't clutter this file up. So this will be code to go through an individual trait, but more scripts have details for each trait. Specific scripts used are also available as separate files in this repository so the details of those can be accessed.
+
+I'm starting with vcf files that have been filtered as follows:
+-only biallilic alleles
+-only SNPs
+-fraction of missing genotypes is <25%
+-min allele freq is 0.05
+-max allele freq is .95
+-depth greater than or equal to 4
+
+I worked with samples from 89 individuals, and around 7.3 mil SNPs. Birds were caught in two location, but there is weak population structure. We will also be accounting for relatedness/structure explicitly when running GEMMA.
+
+## List of Scripts
+Script structure is as follows:
+I. Raw fastq file processing (including some of the pre-gwas workflow steps) *go in with specific file names*
+01. trimmomatic
+02. map reads BWA
+03. coverage
+4.GATK.HapCall.sbatch
+5.GATK.GenDBIImport.sbatch
+6.GATK.Genotype.sbatch
+7.filtering.sbatch
+7b.mrk_dp_as_missing.sbatch
+8.VQSR_filtering
+
+II. 
+
+#PRE-GWAS WORKFLOW
+Here are some additional filtering, etc, steps that I took before starting the GWAS itself.
+
+First off, I needed to fix the GATK called genotypes. This is because certain versions (newer ones) of GATK called missing snps and homozygous reference instead of leaving them as missing. This is an issue as it can bias the data and scew downstream results. To fix this I manually marked zero depth snps and missing a genotype.
+
+## Marking zero depth as missing
+*INSERT LINES HERE, RAN THIS IN A SCRIPT THAT'S AVAILABLE IN REPOSITORY*
+
+Check how many SNPs you're working with by running a little line:
+
+```{}
+bcftools stats  data/vcf/all.vcf.gz | less -S
+```
+
+Redirected the output to a .txt file to save for later.
+
+For more details on how to use bcftools see this webpage: https://eriqande.github.io/con-gen-csu/nmfs-bioinf/handling-vcf-files.html#tell-me-about-my-vcf-file
+
+## VQSR filtering
+This is some hardfiltering done to make sure you're working with the highest quality SNPs. The following filtering is based on best practices and it was what the Ruegg lab uses.
+
+-filter "QUAL < 30.0" --filter-name "QUAL30" \
+-filter "SOR > 3.0" --filter-name "SOR3" \
+-filter "FS > 60.0" --filter-name "FS60" \
+-filter "MQ < 40.0" --filter-name "MQ40" \
+-filter "QD < 2.0" --filter-name "QD2" \
+-filter "MQRankSum < -12.5" --filter-name "MQRankSum-12.5" \
+-filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRankSum-8"
+
+Again, this filtering is in a scipt but you're using GATK to filter here. Did this *after* making zero depth genotypes as missing!
+
+I did the mark 0 depth and this filtering step on each scaffold file separately (so each individuals info for a given scaffold was in one file) and then merged those together to get a single .vcf file with all the data later.
+
+## BEAGLE 4.1 Imputation
+GEMMA can't work on missing data, so you either have to filter out SNPs where any individuals are missing genotypes (which could results in a significant reduction in the number of SNPs you're working with) or you can impute missing genotypes. I went with the later toa void looking info and because I had a high depth and so felt better about the accuracy of the missing genotypes. If I'd had lower quality sequence data I might've opted for more stringent filtering instead...
+
+This BEAGLE imputation was done using the impute.sh script.
+
+```{}
+BEAGLE_JAR="/projects/ericacnr@colostate.edu/mambaforge/envs/bioinf/java/beagle.27Jan18.7e1.jar"
+j=GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr.vcf
+
+java -Xmx180G -jar $BEAGLE_JAR \
+gt="$j" \
+out=GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz \
+nthreads=48
+```
+
+The log had this as the final output: 
+Number of markers:             7487128
+Total time for building model: 2 hours 35 minutes 59 seconds
+Total time for sampling:       42 minutes 24 seconds
+Total run time:                3 hours 28 minutes 15 seconds
+
+I like to just double check that nothing weird happened by making sure the line number is the same before and after imputation.
+
+```{}
+zcat GCRF.mkdp0_merged_25missing_min.5max.95_depth4.vcf.gz | wc -l
+#OUTPUT
+7487139
+
+zcat GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz | wc -l
+#OUTPUT
+7487139
+```
+
+I do this because in one iteration imputation resulted in duplication of the lines, requiring a bunch of extra steps to get things sorted. If this happens, I've got the code to fix it but maybe best to just try running it again.
+
+### Here's the steps to fix that issue if it happens again
+Which suggests it was running the correct number of SNPs (7942760) however upon inspecting the file there was over 9mil lines, which doesn't make sense and suggested that some of the markers (~2mil) were being duplicated. Additionally, there was an error with the imputed files where the Chromosome position was missing in the header. So to fix that issue first, I cropped the header from the original merged file and added it to the imputed file.
+
+```{}
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ zcat GCRF_merged_impute4.1.vcf.gz |grep -v "^#" > GCRF_merged_impute4.1.vcf_nohead
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ zcat GCRF_merged.vcf.gz | grep "^#" > header.txt
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ cat GCRF_merged_impute4.1.vcf_nohead | wc -l
+9943613
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ cat header.txt GCRF_merged_impute4.1.vcf_nohead | bgzip -c > GCRF_merged_imputed4.1_newhead.vcf.gz
+```
+
+I then attempted to apply the bcftools norms function on this corrected file...
+
+```{}
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ bcftools norm -d none -f ../../Reference/leucosticte_australis_final_assembly.fasta  GCRF_merged_imputed4.1_newhead.vcf.gz > GCRF_merged_impute4.1.rm_dup.vcf.gz
+Lines   total/split/joined/realigned/skipped:	9943613/0/0/0/0
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ cat GCRF_merged_impute4.1.rm_dup.vcf.gz | grep -v "^#" | wc -l
+9943500
+```
+
+This still left me with too many lines, but I tried to apply plink anyway... it threw an error though, something about split chromosomes?
+
+```{}
+(GWAS) [ericacnr@colostate.edu@login12 impute]$ plink --vcf GCRF_merged_imputed4.1_newhead.vcf.gz --aec --recode --out GCRF_newhead
+PLINK v1.90b6.21 64-bit (19 Oct 2020)          www.cog-genomics.org/plink/1.9/
+(C) 2005-2020 Shaun Purcell, Christopher Chang   GNU General Public License v3
+Logging to GCRF_newhead.log.
+Options in effect:
+  --allow-extra-chr
+  --out GCRF_newhead
+  --recode
+  --vcf GCRF_merged_imputed4.1_newhead.vcf.gz
+
+15884 MB RAM detected; reserving 7942 MB for main workspace.
+--vcf: GCRF_newhead-temporary.bed + GCRF_newhead-temporary.bim +
+GCRF_newhead-temporary.fam written.
+Error: .bim file has a split chromosome.  Use --make-bed by itself to
+remedy this.
+```
+
+So I tried sorting the vcf file.
+
+```{}
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ bcftools sort GCRF_merged_imputed4.1_newhead.vcf.gz > GCRF_merged_imputed4.1_newhead.sort.vcf
+Writing to /tmp/bcftools.zBleDc
+Merging 7 temporary files
+Cleaning
+Done
+```
+
+This sorting works! So doing the bcftools norm again on the sorted file.
+
+```{}
+(GWAS) [ericacnr@colostate.edu@login12 impute]$ conda activate bioinf
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ bcftools norm -d none -f ../../Reference/leucosticte_australis_final_assembly.fasta  GCRF_merged_imputed4.1_newhead.sort.vcf > GCRF_merged_impute4.1.sort.rm_dup.vcf.gz
+Lines   total/split/joined/realigned/skipped:	9943613/0/0/0/0
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ cat GCRF_merged_impute4.1.sort.rm_dup.vcf.gz | grep -v "^#" |wc -l
+7942760
+(bioinf) [ericacnr@colostate.edu@login12 impute]$ mv GCRF_merged_impute4.1.sort.rm_dup.vcf.gz GCRF_merged_impute4.1.sort.rm_dup.vcf
+```
+
+## PLINK to make .ped and .map files
+I made a new set of folders for these files to keep them away from the raw .vcf files. I also installed PLINK into the same conda environment as my GEMMA (called GWAS2). These PLINK commands don't need to be run in a script usually, they don't take too long.
+
+```{}
+conda activate GWAS2
+plink --vcf GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz --aec --recode --out ../new_input_files/base_files
+
+#OUTPUT
+PLINK v1.90b6.21 64-bit (19 Oct 2020)          www.cog-genomics.org/plink/1.9/
+(C) 2005-2020 Shaun Purcell, Christopher Chang   GNU General Public License v3
+Logging to ../new_input_files/base_files.log.
+Options in effect:
+  --allow-extra-chr
+  --out ../new_input_files/base_files
+  --recode
+  --vcf GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz
+
+15884 MB RAM detected; reserving 7942 MB for main workspace.
+--vcf: ../new_input_files/base_files-temporary.bed +
+../new_input_files/base_files-temporary.bim +
+../new_input_files/base_files-temporary.fam written.
+7487128 variants loaded from .bim file.
+89 people (0 males, 0 females, 89 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to ../new_input_files/base_files.nosex .
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 89 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+7487128 variants and 89 people pass filters and QC.
+Note: No phenotypes present.
+--recode ped to ../new_input_files/base_files.ped +
+../new_input_files/base_files.map ... done.
+```
+
+## Fixing the .map files
+So with the way my input files are, some stuff has to get changed before moving forward. The first in my .map file (this is the file that has the information for each of the SNPs, careful when you open this!! It'll be really big so always used a head function). The files currently has a . where the snp name is supposed to be. Each snps neads a unique marker, so an easy way to do this is to take the scaffold name from the first column and join it with the snp position info in the last column to make a new rs (snp name) value.
+
+The initial file looks like this:
+```{}
+cat base_files.map | head
+#OUTPUT
+Scaffold_1__1_contigs__length_151072562	.	0	751
+Scaffold_1__1_contigs__length_151072562	.	0	2701
+Scaffold_1__1_contigs__length_151072562	.	0	3064
+Scaffold_1__1_contigs__length_151072562	.	0	4683
+Scaffold_1__1_contigs__length_151072562	.	0	4696
+Scaffold_1__1_contigs__length_151072562	.	0	5001
+Scaffold_1__1_contigs__length_151072562	.	0	5009
+```
+
+We're going to restructure it.
+
+```{}
+cat base_files.map | awk '{print$1"\t"$1"."$4"\t"$3"\t"$4}' > GCRF_base_file.map_loc.map
+cat GCRF_base_file.map_loc.map | head
+#OUTPUT
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.751	0	751
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.2701	0	2701
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.3064	0	3064
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.4683	0	4683
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.4696	0	4696
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.5001	0	5001
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.5009	0	5009
+```
+
+The only flaw I've seen downstream with this is that the SNP names end up being super long. I would actually recomend just using the Scaffold_# and then attaching the positions, thus removing all the extra stuff that isn't informative.
+
+## Making the .ped file
+So right now, the .ped file doesn't have the morphology information in it, and also the populations/family ID in the first column needs to be numerical. I think there is a way you should be able to do this in PLINK but I honestly couldn't figure it out so instead I just made the .ped file in R and imported in back onto Alpine.
+
+Here I'm importing my morphology data and cleaning it up a bit. The format of a .ped file is 
+FID IID
+
+```{r}
+morpho <- read.csv("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/GWAS input/GCRF_morphology_residuals.csv")
+
+FID_file <- read.table("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/locID_num.txt", header = FALSE, sep = " ", na.strings = c("", "NA"))
+
+FID_file$V3 <- 0
+FID_file$V4 <- 0
+FID_file$V5 <- 0
+#adding the bill_length as the 6th row, skipping tarsus for now
+morpho_ped_file <- data.frame(FID_file, morpho[,c(3:10)])
+write.table(morpho_ped_file, file="~/Desktop/GCRF/GCRF-Present/GenomicPipeline/GWAS input/GCRF_morpho_residuals.txt", row.names=F, col.names=F)
+```
+
+This morphology file now has the first two columns as numerical FID and the IID. Then I added blanks for the next three columns, which represent stuff like sex that I don't have info for. Then I added on a couple columns for morphology. In this case I had a lot of traits I was working with, but we're going to ignore the additional columns and just keep the 6th, which will be the single traits we're focusing on, culmen_end_length.
+
+So first I'll just remove all the " that exist in the imported spreadsheet, and artifact of moving stuff in from R I guess.
+
+```{}
+sed 's/"//g' GCRF_morpho_residuals.txt > GCRF_morpho_clean.txt
+```
+
+Then I cut out just the columns I want. You always want the first 5, and in this case I just wanted the first morphology trait, hence using the 1-6.
+
+```{}
+cut -d ' ' -f 1-6 GCRF_morpho_clean.txt > culmen_end_length
+```
+
+So the format of a .ped file is that the first 6 columns are the info we've discussed, and then the next however many are the genotypes are a location. So these files are incredibly big and should be opened with caution (and a less -S command). Because I'm using this method of creating new .ped files for each morphology, I needed a way to include the genotype data in a simple maner. To accomplish this, I cut out the genotype data from the original .ped file I made with my first PLINK command and saves this as GCRF_base_file_genotypes.txt. So this is basically the original .ped file minus the first 6 columns. I then take the new started .ped file with the morphology and paste the genotype file back on to get a complete .ped file...
+
+```{}
+paste culmen_end_length ../GCRF_base_file_genotypes.txt > culmen_end_length.ped
+
+#checked column numbers for all of these and everything checks out!
+```
+
+This takes some time but works nicely. I always double check the final column number and make sure it matches the original unaltered .ped file.
+
+## PLINK for .bim .bam .fam files
+So once you have a .map file that works and a .ped file that has the appropriate morphology in it, it's time to make the files that GEMMA takes as it's imput. For my workflow I made a single .map file and then separate .ped files for each morphological trait I wanted to run. This seemed like the cleanest way to go about it, although I believe it's possible to have a single .ped file with all the morpho in sequential columns and indicate which morphology to pull. That never worked for me.
+
+Again, not running this in a script:
+
+```{}
+plink --ped culmen_end_length.ped --map GCRF_base_file.map --out culmen_end_length --make-bed --aec --allow-no-sex
+```
+The --aec flag is to "allow extra chromosomes". This is important because it's going to try and read the scaffolds as chromosomes. The program was designed to run on human data so it's not expecting so many chromosomes! Even if you have reorganized you're SNPs to be at a chromosome level before running this, it's best to use this flag and avoide errors. Additionally, there's an --allow-no-sex flag, which basically avoids it throwing an error if you havn't put sex information into the .ped file (I didn't have consistent sex data so I added this in).
+
+You'll get the following output files:
+GCRF_base_file.bed -> binary file with the SNP info, don't try and view this
+GCRF_base_file.bim -> double check this file to make sure it has the correct SNP ID information that you input from the .map file, also be careful opening as it'll be big
+GCRF_base_file.fam -> this has all the individual info and values for the morphology
+
+Alrighty! So once you have all of these files and everything looks good, you're ready to start running GEMMA!
+
+# RUNNING THE GWAS
+I ran both a LMM and a BSLMM model on all of my data. So the traits I did were:
+I. FEATHER
+1. Feather PC1
+2. Pennaceous Barbule Length
+3. Pennaceous Barbule Density
+4. Plumulaceous Barbule Length
+5. Plumulaceous Barbule Density
+6. Plumulaceous Barbule Node Density
+II. BEAK
+1. Beak PC1
+2. Nare Length
+3. Beak Depth
+4. Beak Width
+5. Culmen End Length (Beak Length)
+
+For the Feather and Beak PC1, I ran a PCA on all of the feather or beak traits together and extracted the first PC from each. The details of this are in a script called 01B_featherPCA.R and 01B_billPCA.R. The output of these two scripts are .ped files with the PC1 values in the morpho column.
+
+For the beak morphology traits I did a linear regression against tarsus length to correct for body size and took the residuals for the GWAS. That stuff is in a script called 01B_billRes.R. The output of that is a .ped file with the residuals as the morphology. The feather traits I didn't do a body size correction and just ran those straight up as a .ped file.
+
+I ran BSLMM and LMM on all of the traits listed below, with the following lines of code.
+
+
+## Relatedness Matrix
+So depending on the way you want to structure you're files, you could do this once and always reference it in you're scripts or do it separately for each trait... Kinda personal choice.
+
+The relatedness matrix is kinda the coolest part of using GEMMA for GWAS. This basically makes a files that's a...well... relatedness matrix. You then include this in your GWAS models as a covariant which allows for directly accounting for population structure and relatedness between individual, something that is typically a big issue with GWAS studies. So this step is super important.
+
+Okay so before I get into the line of code though, some notes on how to run GEMMA in Alpine. You'll first need to make sure the dependencies are loaded up. So go ahead and start an acompile and load those modules. Also, load them in this order or they're throw and error.
+
+```{}
+acompile
+module load gcc/10.3.0
+module load openmpi
+```
+
+Next, go ahead an load up you're conda environment with GEMMA in it.
+
+```{}
+conda activate GWAS2
+```
+
+Now, most of the time you're going to be running GEMMA in a script but you'll need to include these things in the top of your script too so I'm just writing them out here. Additionally, you need to tell alpine (i guess) exactly where you downloaded GEMMA so it can find it. So instead of just writing "GEMMA" you have to give it a full path like "/projects/ericacnr@colostate.edu/GEMMA/bin/gemma". You might be able to get around this with something like a symbolic link but I never bothered.
+
+Okay, so the relatedness matrix runs fine outside a script.
+
+```{}
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile GCRF_bill_morpho \
+	-gk 1 -o GCRF_relate
+
+```
+
+The -bfile flag is where you give it your prefix for the .bim .bed .fam files that you made with PLINK before. If your files don't have a consistent prefix, you can explicitly say which file is names which with some additional flags (see the GEMMA manual) but this is the neatest way of doing it. The -gk 1 flag is telling it to run a "centered relatedness matrix" as opposed to a "standardized relatedness matrix". Make your own decision about which is best, I went with 1. The -o gives the prefix for the output file.
+
+What you get when this is done running is an output folder containing a file that's called GCRF_relate.cXX.txt. This is the file that you'll reference in the actual GWAS as a covariant.
+
+So now you have a relatedness matrix! Awesome, you're ready to run an actual GWAS. But what model do I run??
+
+Well there are some things to consider. The basic options are a LMM, BSLMM, and MLMM. The Linear Mixed Model is the straight forward version of a GWAS. It works on a single trait and gives you p-values for each snp based on how significant of an effect that snp has on explaining the variation seen in the trait. This is what you see output as manhattan plots, and it the most straight forward version of a GWAS. It's also really only good as picking up on large effect snps, and you have a lot of issue with multiple testing so you have to be very stringent with you're filtering for significance (ie using a Bonferoni correction). The next option in a Baysian Sparse Linear Mixed Model. This is a cool one that is nice for polygenic traits as it basically does some fancy MCMC stuff and gets effect sizes of different traits. So it's a bit better as finding smaller effect snps, and the output is a bit different. Instead of a p-value you get a Posterior Inclusion Probability (PIP) which is basically the percentage of time a given snp showed up as being relevant in the MCMC models. This is a little more relaxed than the LMM filtering and I've found gives more snps. The last one is a Multivariant Linear Mixed Model. This guy is cool in theory as it kind of does the LMM thing with p-values but taken into account multiple phenotypes at the same time and gives you snps that effects all of the traits. The problem I've found is that it's finicy when setting up the files, super computationally intensive, and the output is tough. I got mine to run and it seemed fine but then the results made no sense (like 1mil significant snps??). So I didn't chase that down and ended up going with just the BSLMM and LMM. Ask yourself what your goals are and what method works best, and read up on what other people have used to answer similar questions if that's an option.
+
+
+## Linear Mixed Models
+So my approach here was to use the same .map file for all of the PLINK commands, but make separate .ped files for each morphological trait. 
+
+Once you have the .bed .bim .fam files for the trait you're working with, and the relatedness matrix, this code is pretty simple.
+
+I ran this in a script although it didn't actually take too long. I believe the script name is lmm.sh or something vague like that. Essentially you want all the usual bash stuff to tell it how many cores and memory, and then also:
+
+```{}
+source ~/.bashrc
+
+set -x
+
+module load gcc/10.3
+module load openmpi
+
+conda activate GWAS2
+```
+
+I usually pulled like 4 nodes, 32 tasks per node, and 100G of memory for an hour. This was a bit overkill but I never did my due diligence to see how much it actually takes.
+
+Anyway, the actual command looks something like this:
+
+```{}
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile culmen_end_length -k ../output/relate.cXX.txt -lmm 1 -o culmen_end_length.lmm -w 500000 -s 5000000
+```
+
+Again the -bfile flag it the prefix for the PLINK files. -k gives the location of the relatedness matrix. -lmm 1 is saying run a Wald test. The Wald test assesses the significance of the SNP genotypes in a linear regression model and is used to test the null hypohtesis that the effect size of a genetic variant on the phenotyupic trait is zero (ie. there is no association between the variant and the trait). See the manual for other options. The -w and -s define a sliding window and sliding step for the program to use. I'm not entirely sure what these actually effect, I used this because Marina did. Need to dig into this a bit more.
+
+The output from this test is a primary the .assoc.txt files which has the p-values for each SNP. I filtered these SNPs using a threshold of 5e-08 for the signficance. This is a widely accepted threshold for GWAS studies that is pretty stringent but not as bad as a full Bonferoni correction (0.05/# of snps). The filtering for this stuff is done in a script called GEMMA_ulmm_output_analysis.R.This was after reordering the output files to be at a chromosome level.
+
+## Baysian Sparse Linear Mixed Model
+I used the same approach for generating input files. The command is:
+
+```{}
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile culmen_end_length \
+-k ../output/relate_PC.cXX.txt -bslmm 1 -o culmen_end_length.bslmm \
+-w 500000 -s 5000000
+```
+
+The -bslmm 1 flag is using a standard linear BSLMM. There's a bunch of output files for this one but the main on is the .param.txt which has the PIP and effect size values. Other files output are useful for evaluating how well the model ran, and looking at mixing for the MCMC model.
+
+I processed these in a script called GEMMA_bslmm_output_analysis_billPC_chr.R and _feather_chr.R. This was after reordering the output files to be at a chromosome level. Significant SNPs were filtered with a threshold of 0.01 PIP.
+
+# IDENTIFYING GENES ASSOCIATED WITH THE SNPS
+## Bedtools closests to pull annotation information
+So first I need to make a .bed file with all of the snp information from the original .vcf file, that way I can use this to isolate the specific snps I need.
+
+```{}
+zcat GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz | grep -v "^#" | awk '{print$1"\t"($2-1)"\t"$2}' > GCRF_merged_impute4.1.bed
+head GCRF_merged_impute4.1.bed
+Scaffold_1__1_contigs__length_151072562	750	751
+Scaffold_1__1_contigs__length_151072562	2700	2701
+Scaffold_1__1_contigs__length_151072562	3063	3064
+Scaffold_1__1_contigs__length_151072562	4682	4683
+cat GCRF_merged_impute4.1.bed | awk '{print$1"\t"$2"\t"$3"\t"($1"."$3)}' > GCRF_merged_impute4.1_position.bed
+head GCRF_merged_impute4.1_position.bed
+Scaffold_1__1_contigs__length_151072562	750	751	Scaffold_1__1_contigs__length_151072562.751
+Scaffold_1__1_contigs__length_151072562	2700	2701	Scaffold_1__1_contigs__length_151072562.2701
+Scaffold_1__1_contigs__length_151072562	3063	3064	Scaffold_1__1_contigs__length_151072562.3064
+Scaffold_1__1_contigs__length_151072562	4682	4683	Scaffold_1__1_contigs__length_151072562.4683
+```
+
+Okay so that's making a .bed file, now I need to get this to be at a chromosomal level. I used the reoder_VCF functions to take the vcf and remake it. I output that as GCRF_clean.SNP.imuted_gt.ZFchr.bed.
+
+ZFCHROM   ZFPOS   rs    pos-1
+1	1918977	Scaffold_2__1_contigs__length_114774641.114774317	114774316
+1	1920329	Scaffold_2__1_contigs__length_114774641.114772965	114772964
+1	1921417	Scaffold_2__1_contigs__length_114774641.114771877	114771876
+1	1922933	Scaffold_2__1_contigs__length_114774641.114770361	114770360
+
+I then reformatted that to be what I need for the .bed file....
+```{}
+cat GCRF_clean.SNP.imuted_gt.ZFchr.bed | awk '{print$1"\t"($2-1)"\t"$2"\t"$3}' > GCRF.SNP.imputed_gt.ZFchr.sorted.bed
+```
+
+ZFCHROM ZFPOS-1 ZFPOS rs
+1	1918976	1918977	Scaffold_2__1_contigs__length_114774641.114774317
+1	1920328	1920329	Scaffold_2__1_contigs__length_114774641.114772965
+1	1921416	1921417	Scaffold_2__1_contigs__length_114774641.114771877
+1	1922932	1922933	Scaffold_2__1_contigs__length_114774641.114770361
+
+So now that that file is correct, I'm going to use a grep function to pull out the lines with the specific rs values that I want. So for each model and each trait within that I did these functions. The following is example code for the feather_PC_snps resulting from the BSLMM model. Note that you need to run a sort function to make sure the snps are in order. I'm pulling the annotation information from a slightly older version of the T. guttata (Zebra Finch) genome assembly, but that didn't seem to be an issue downstream.
+
+```{}
+#Pulling out the specific SNPs I want to look at for this trait
+cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E "Scaffold_8__1_contigs__length_35685229.25471973|Scaffold_6__1_contigs__length_71876329.60198070|Scaffold_2__1_contigs__length_114774641.92336930|Scaffold_5__1_contigs__length_71959612.65589803|Scaffold_1__1_contigs__length_151072562.128626182|Scaffold_1__1_contigs__length_151072562.146593939|Scaffold_2__1_contigs__length_114774641.80634326|Scaffold_3__1_contigs__length_112408489.112330666" > ../new_input_files/snps/feather_PC_snps.bed
+
+#Converting my annotation file to a .bed file to run in bedtools closest
+conda activate bioinf
+gzip -dc Taeniopygia_guttata.taeGut3.2.4.98.chr.gtf.gz | gff2bed > Taeniopygia_guttata.bed
+bedtools sort -i Taeniopygia_guttata.bed > Taeniopygia_guttata_sorted.bed
+bedtools sort -i feather_PC_snps.bed > feather_PC_snps_sorted.bed
+
+#bedtools closest to get the genes
+bedtools closest -a feather_PC_snps_sorted.bed -b /scratch/alpine/ericacnr@colostate.edu/GCRF/Reference/ZEFI_annotation/Taeniopygia_guttata_sorted.bed -d > feather_distance.bed
+```
+
+## Linkage Decay to determine filtering parameteres for genes
+
+Using NGSLD to figure out the linkage disequilibrium. I think ideally I would be running this on a vcf that has been fixed to be at the chromosome level but I'm going to try and dial everything in before I do that.
+
+Okay, so on second thought I'm going to try and new program (https://doi.org/10.1093/bioinformatics/bty875) called PopLDdecay.
+
+```{}
+module load gcc/10.3.0
+module load zlib
+
+/projects/ericacnr@colostate.edu/PopLDdecay/bin/PopLDdecay -InVCF GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz -OutStat GCRF.LD.decay.stat
+```
+
+Running this is as a script cause I think it's going to take up a lot of memory.
+
+Also going to try using PLINK since that's such a delightful program. Following this tutorial: https://speciationgenomics.github.io/ld_decay/
+
+```{}
+mkdir ../ld_decay
+VCF=/scratch/alpine/ericacnr@colostate.edu/GCRF/GWAS/impute_new/GCRF.mkdp0_merged_25missing_min.5max.95_depth4_vqsr_gl_impute4.1.vcf.gz
+cd ../ld_decay/
+```
+
+Going to run this on just the first scaffold, Scaffold 1. Scaffold_1__1_contigs__length_151072562
+```{}
+plink --vcf $VCF --double-id --allow-extra-chr --allow-no-sex \
+--set-missing-var-ids @:# \
+--chr Scaffold_1__1_contigs__length_151072562 \
+--thin 0.1 -r2 gz --ld-window 100 --ld-window-kb 300 \
+--ld-window-r2 0 \
+--make-bed --out GCRF_scf1
+```
+--vcf - specified the location of our VCF file.
+--double-id - told plink to duplicate the id of our samples (this is because plink typically expects a family and individual id - i.e. for pedigree data - this is not necessary for us.
+--allow-extra-chr - allow additional chromosomes beyond the human chromosome set. This is necessary as otherwise plink expects chromosomes 1-22 and the human X chromosome.
+--set-missing-var-ids - also necessary to set a variant ID for our SNPs. Human and model organisms often have annotated SNP names and so plink will look for these. We do not have them so instead we set ours to default to chromosome:position which can be achieved in plink by setting the option @:# - see here for more info.
+--chr - an option to choose the chromosome we are running the analysis on. Here we are only performing it on Scaffold 1.
+--thin - thin randomly thins out the data - i.e. it randomly retains p proportion of the data. Here we set that to 0.1 or 10%. This means that each site has a 10% probability of remaining in the dataset. This is done to ensure the analysis runs quickly and our output isn’t too big as it can quickly get out of hand!
+--r2 - finally we’re on to the options for LD! This tells plink to produce squared correlation coefficients. We also provide the argument gz in order to ensure the output is compressed. This is very important as it is easy to produce EXTREMELY large files.
+--ld-window - this allows us to set the size of the lower end of the LD window. In this case, we set it to 100 bp - i.e. any sites with < 100 sites between them are ignored.
+--ld-window-kb - this is the upper end of the LD window. Here we set it to 300, meaning that we ignore any two sites more than 300kb apart in the genome.
+--ld-window-r2 - the final LD command - this sets a filter on the final output but we want all values of LD to be written out, so we set it to 0.
+--make-bed - this just makes a plink bedfile for future analyses
+--out Produce the prefix for the output data.
+
+Run the python script...
+```{}
+acompile
+module load python
+python ld_decay_calc.py -i GCRF_scf1.ld.gz -o GCRF_scf1
+```
+
+```{r}
+rm(list = ls())
+
+library(tidyverse)
+
+# set path
+my_bins <- "./GCRF-Present/LD_decay/GCRF_scf1.ld_decay_bins"
+
+# read in data
+ld_bins <- read_tsv(my_bins)
+
+# plot LD decay
+ggplot(ld_bins, aes(distance, avg_R2)) + geom_line() +
+  xlab("Distance (bp)") + ylab(expression(italic(r)^2))
+
+```
+Repeating this again for scaffold 2 and 3 to see if it's consistent across the long ones but based on this using 100kb as my window, which is great.
+
+```{r}
+rm(list = ls())
+
+# set path
+my_bins <- "~/Desktop/GCRF/GCRF-Present/LD_decay/GCRF_scf2.ld_decay_bins"
+
+# read in data
+ld_bins <- read_tsv(my_bins)
+
+# plot LD decay
+ggplot(ld_bins, aes(distance, avg_R2)) + geom_line() +
+  xlab("Distance (bp)") + ylab(expression(italic(r)^2))
+
+```
+
+## Identifying the genes
+So this is example code of how I went about this. Basically you read in the bedtools closest output and filter is for snps that are within the gene or under a threshold distance away from the start or stop of the code. I went with 100000kb based on the LD decay profile but there's some debate about this so I might end up going with 50000kb which is that standard approach in the lab based on a paper I have yet to find.
+```{r}
+bill_PC <- read.table("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/bill_distance.bed", sep="\t")
+```
+
+```{r, bill_genes}
+head(bill_PC)
+bill_PC_genes <- bill_PC %>% filter(bill_PC$V12=="gene")
+
+threshold <- 100000
+
+# Filter for SNPs within 100000kb of gene start or stop, or inside the gene
+bill_close_genes <- bill_PC_genes %>%
+  filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+         (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
+         (V2 >= V6 & V2 <= V7))
+nrow(bill_close_genes)
+
+df <- separate(bill_close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+
+# Add column names
+colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+
+bill_close_genes <- data.frame(bill_close_genes[,1:13], df, bill_close_genes$V15)
+head(bill_close_genes)
+
+#bill_pt_coding <- bill_close_genes %>% filter(bill_close_genes$gene_biotype=="gene_biotype protein_coding;")
+#nrow(bill_pt_coding)
+
+bill_gene_names <- data.frame(bill_close_genes$V4,bill_close_genes$gene_id, bill_close_genes$gene_name )
+write.table(bill_gene_names, "/Users/ericarobertson/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/bill_PC_genes.txt", quote=F, sep = "\t")
+```
+
+1 Scaffold_2__1_contigs__length_114774641.85189033 gene_id ENSTGUG00000010196 gene_name INPP4A
+2 Scaffold_23__1_contigs__length_18116493.1385210 gene_id ENSTGUG00000000148 
+3 Scaffold_23__1_contigs__length_18116493.2449928 gene_id ENSTGUG00000000288 gene_name UBTD2
+4 Scaffold_1__1_contigs__length_151072562.54132477 gene_id ENSTGUG00000001172 gene_name KIAA1217
+5 Scaffold_1__1_contigs__length_151072562.138869993 gene_id ENSTGUG00000009758 gene_name APCDD1
+6 Scaffold_5__1_contigs__length_71959612.14244530 gene_id ENSTGUG00000009822 gene_name CPEB2
+7 Scaffold_7__1_contigs__length_62267870.31872111 gene_id ENSTGUG00000011762
+
+Sometimes the output doesn't have a gene name. If you search the gene_id it might have info on ensembl, but usually this means it's like a "novel gene" or something else we don't have information on.
+
+# REORDERING FOR CHROMOSOME LEVEL
+
+# DATA VISUALIZATION
+So the main plots for this work are the Manhattan plots showing the snps with p-values and the PIP plots showing the snps with PIP values scaled by effect size. The trick with this kind of stuff is that there's so many points, you want to be able to use ggplot and save them as a pdf so they work nicely in Adobe Illustrator but vectorizing all those points is a huge pain. So what I did was basically took the code from various tutorials (specifically the BSLMM one) and made it all work in ggplot, then I found this fun package called ggrastr that can rasterize some of the layers of a ggplot while leaving the rest as vectors. So this way you can rasterize the bulk of the points while allowing the rest to play nicely in a pdf format! Which is sick. So below I'll give an example of some of the code I used. The actual plotting code is in two files, bill_manhattan_plots_final.R and feather_manhattan_plots_final.R.
+
+## Manhattan plots
+Working with the feather data here.
+
+Libraries:
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(geiger)
+library(ggrepel)
+library(ggpubr) #I believe this is what allows you to do the ggarrange function and put this as a pdf, as opposed to ggsave which i think only does png
+library(data.table)
+library("ggnewscale") #this is an awesome little package that allows you to have multiple color scale functions without over-writting the previous ones
+library('ggrastr') #this is the package that allows you to rasterize some of the layer, downloading this can be kinda of a pain because you have to install to other things into your computer first that it relies on!
+```
+
+```{r}
+
+#starting with the big .assoc.txt file that was output from the lmm but post reordering to get chromosome level
+width <-read_delim("GCRF_feather_PC_ulmm_snps_ZFchr_assoc.txt",delim="\t") %>%  
+  mutate(outlier=if_else(p_wald<5e-8,"outlier","neutral")) 
+c <- width[order(as.numeric(width$ZFCHROM)),]
+c <- c %>% mutate(win_num = 1:nrow(c)) #this is important, is basically takes each snp and gives it a separate order number that is relative to all the others instead of relative to the chromosome of scaffold it's on, so it's 1-# of snps. Without this it's pretty tricky to plot
+
+c2 <- c[sample(nrow(c), size=200000, replace = F),] #I take a subsample of the data to actually plot initially because trying to get stuff to load with all 7mil snps just doesn't work, so you can figure out all the details with this sample as the background puoints (actual significant snps plotted separately) and then use the full version when saving as a pdf
+
+frequency <- table(c$ZFCHROM)
+start <- 1
+lab.pos<-vector()
+for (i in seq_along(frequency)){
+  size <- frequency[i]
+  txtpos <- start+size/2
+  lab.pos <- c(lab.pos, txtpos)
+  start <- start+size
+}
+#The above chunk of code is basically to set up where the labels will go, this allows the labels to be centered in the middle of the chromosome block
+
+specific_breaks <- lab.pos
+
+specific_labels <- c("1", "1A", "2", "3", "4", "4A", "5", "6", "7", 
+                     "8", "9", "10", "11", "12", "13", "14",
+                     " ", "16", " ", " ", "20", " ",
+                     " ", " ", " ", " ", " ", " ", "28",
+                     "Z", "LGE22", " ") 
+#Giving the chromosome labels, note that I leave some as blank because they get so cramped at the end that they overlap, so I removed some. The ticks will still be there but the labels will be readable.
+
+#The next chunk of code is setting up a separate spreadsheet with just the snps that are significant. I found this to be the easiest way to play with colors, control what's rasterized, change shapes and especially at gene labels.
+snps <- c("Scaffold_8__1_contigs__length_35685229.25471973","Scaffold_6__1_contigs__length_71876329.60198070","Scaffold_2__1_contigs__length_114774641.92336930",
+        "Scaffold_5__1_contigs__length_71959612.65589803","Scaffold_1__1_contigs__length_151072562.128626182","Scaffold_1__1_contigs__length_151072562.146593939",
+        "Scaffold_2__1_contigs__length_114774641.80634326","Scaffold_3__1_contigs__length_112408489.112330666","Scaffold_2__1_contigs__length_114774641.80634326",
+        "Scaffold_3__1_contigs__length_112408489.112330666","Scaffold_5__1_contigs__length_71959612.65589803","Scaffold_6__1_contigs__length_71876329.24616234",
+        "Scaffold_21__1_contigs__length_20640149.131805")
+trait <- c("BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","LMM","LMM","LMM","LMM","LMM")
+
+sig_snps <- c[c$rs %in% snps, ]
+sig_snps <- c[match(snps, c$rs), ]
+sig_snps$trait <- c("BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","LMM","LMM","LMM","LMM","LMM")
+sig_snps$annotated <- c("yes","no","yes", "yes","yes","no","no","yes","no","no","no","no","yes")
+sig_snps$gene <- c("RET",NA,"COL4A1;COL4A2","QRFPR","GABBR2",NA,NA,"LOC105760580",NA,"LOC105759048","QRFPR",NA,"PDIA3")
+
+#Here's the actual plotting!
+option2<-ggplot(c, aes(x = win_num, y = -log10(p_wald), color = as.factor(ZFCHROM))) + #make sure you set the chromosome values to a factor
+  rasterise(geom_point(alpha = 1, size = 1, shape = 19), dpi=300) + #note that these are the background dots, and what should be rasterized to get anything to work
+  geom_hline(yintercept = -log10(5e-8), linetype = "dashed", alpha = 0.8) + #adds dashed line for your significance threshold
+  scale_color_manual(values = rep(c("grey80", "grey40", "grey20"), 200)) + #changing the colors of the chromosome blocks
+  scale_x_continuous(breaks = specific_breaks, labels = specific_labels) + #add the chromosome labels
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 9)) + #this can get fiddled with to change the height of the graph, I like them to look a little stouter
+  guides(color = "none") + #this keeps it from trying to create a legend with the chromosome info
+  new_scale_color()+ #this allows the colors scales to coexist without removing the scale_color_manual above
+  geom_point(data = subset(sig_snps, trait == "BSLMM"), aes(x = win_num, y = -log10(p_wald), color = "BSLMM"), size = 2.7, shape=17) +
+  geom_point(data = subset(sig_snps, trait == "LMM"), aes(x = win_num, y = -log10(p_wald), color = "LMM"), size = 1.8) +
+  geom_label_repel(data=subset(sig_snps,annotated=="yes"), aes(x=win_num, y=-log10(p_wald), label=gene), size=3,
+                  segment.color = "black",segment.size = .2,
+                  min.segment.length = unit(0, 'lines'),nudge_y = .03,max.overlaps = 50)+ #this creates little boxed with lines that have the gene names in them, with a repel to keep them from overlapping
+  theme_classic() +
+  labs(x = "Chromosome", y = "-log10(p-value)") +
+  guides(color = guide_legend(override.aes = list(shape =c(17, 19)))) + #changed the legend to have different shapes from the BSLMM and LMM models
+  scale_color_manual(name = "Model",
+                     values = c("BSLMM" = "#A63C2E",
+                                "LMM" = "#C69D44"),
+                     breaks = c("BSLMM","LMM"),
+                     labels = c("BSLMM","LMM")) #specifying the colors and what the legend will say
+option2 #I only ever run this if the c2 (sample) data is being plotted, otherwise R just can't handle it and usually crashes
+
+#quick export for powerpoints and stuff
+png("~/Desktop/GCRF/GCRF-Present/files/results/figures/GCRF.feather_PC_labels.png", width=11.7, height=2.5, units="in", res=300)
+ggarrange(option2)
+dev.off()
+
+#proper export with pdf
+pdf("~/Desktop/GCRF/GCRF-Present/files/results/figures/GCRF.feather_all.assoc.newaxis.short.label.pdf", width=11.7, height=2.5)
+ggarrange(option2)
+dev.off()
+
+```
+
+## PIP plots
+Now I'll dig into the PIP plot. This one is tricky because it's nice to have a grey and white alternating background for the chromosome blocks. That took a while to figure out.
+
+```{r}
+#reading in the params function and adding the effect size column, this will be what decides how big to dots are later
+params<-fread("../bslmm/GCRF_featherPC_clean.chr1-31ZF.genotype.params.txt",header=T,sep="\t", data.table=F)
+params["eff"]<-abs(params$beta*params$gamma)
+
+# add linkage group column (chr)
+chr<-params$ZFCHROM
+
+# sort by linkage group and position
+params.sort<-params[order(as.numeric(params$ZFCHROM), params$ZFPOS),] %>% mutate(win_num = 1:nrow(params))
+
+#again taking a smaller sample to make the plotting easier while getting to a final version you like
+params.ss <- params.sort[sample(nrow(params.sort), size=200000, replace = F),]
+#write.table(params.sort, file="param.sort.txt", sep=" ", col.names = T, row.name=F)
+params.ss <- params.ss[order(as.numeric(params.ss$ZFCHROM)),] %>% mutate(win_num = 1:nrow(params.ss))
+
+# get list of linkage groups/chromosomes
+chrs<-sort(unique(as.numeric(chr)))
+
+# Loop over each chromosome
+frequency <- table(params.sort$ZFCHROM)
+start <- 1
+lab.pos<-vector()
+for (i in seq_along(frequency)){
+  size <- frequency[i]
+  txtpos <- start+size/2
+  lab.pos <- c(lab.pos, txtpos)
+  start <- start+size
+}
+#a similar set up here, getting the spacing for the blocks and the labels
+
+specific_breaks <- lab.pos
+specific_labels <- c("1", "1A", "2", "3", "4", "4A", "5", "6", "7", 
+                     "8", "9", "10", "11", "12", "13", "14",
+                     " ", "16", " ", " ", "20", " ",
+                     " ", " ", " ", " ", " ", " ", "28",
+                     "Z", "LGE22", " ") 
+
+chromosomes <- unique(params.sort$ZFCHROM)
+
+# Initialize an empty dataframe to store start and end values
+chromosome_ranges <- data.frame(chr = integer(), start = integer(), end = integer())
+
+# Loop through each chromosome; this is basically to set the beginning and end points for the alternating colors of boxes
+for (chromosome in chromosomes) {
+  # Calculate min and max win_num values for the current chromosome
+  min_win <- min(params.sort$win_num[params.sort$ZFCHROM == chromosome], na.rm = TRUE)
+  max_win <- max(params.sort$win_num[params.sort$ZFCHROM == chromosome], na.rm = TRUE)
+  
+  # Create a row with chromosome number, start, and end values
+  chromosome_row <- data.frame(chr = chromosome, start = min_win, end = max_win)
+  
+  # Append the row to the chromosome_ranges dataframe
+  chromosome_ranges <- rbind(chromosome_ranges, chromosome_row)
+}
+#okay not the most efficient manner but couldn't get ggplot to alternate so I forced it, one color for each chromsome block
+fill_colors <- c("lightgrey", "white", "lightgrey", "white", "lightgrey","white", "lightgrey",
+                 "white", "lightgrey","white", "lightgrey","white", "lightgrey","white", "lightgrey",
+                 "white", "lightgrey","white", "lightgrey","white", "lightgrey","white", "lightgrey",
+                 "white", "lightgrey","white", "lightgrey","white", "lightgrey","white", "lightgrey", "white")  # Add more colors as needed
+
+PIP1 <- ggplot() +
+  geom_rect(data = chromosome_ranges, aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf), fill = fill_colors, alpha = 1) +  # Add shaded regions for chromosomes
+  rasterize(geom_point(data=params.sort, aes(x = win_num, y = gamma, size = eff, fill = gamma >= 0.01), shape = 21), dpi=300) + #rasterize the bulk of the points, these are the nonsignificant background points
+  scale_fill_manual(values = c("FALSE" = "black", "TRUE" = "#B33019")) + #plot the significant points
+  scale_x_continuous(breaks = specific_breaks, labels = specific_labels) +
+  scale_size_continuous(range = c(2, 10)) +
+  theme_classic() +
+  labs(x = "Chromosome", y = "PIP")+
+  guides(size = guide_legend(title = "Effect Size"), fill = FALSE)  # Remove gamma value legend
+
+PIP1 #again, only run this if using the subsample dataframe
+
+pdf("~/Desktop/GCRF/GCRF-Present/files/results/figures/GCRF.feather_PIP.eff.pdf", width=11.7, height=2.5)
+ggarrange(PIP1)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
