@@ -305,6 +305,185 @@ I used the same approach for generating input files. The command is:
 
 The -bslmm 1 flag is using a standard linear BSLMM. There's a bunch of output files for this one but the main on is the .param.txt which has the PIP and effect size values. Other files output are useful for evaluating how well the model ran, and looking at mixing for the MCMC model. I don't know anything about this, but below I'll link a tutorial that gives tons of code for going over it.
 
+# DATA VISUALIZATION
+So the main plots for this work are the Manhattan plots showing the snps with p-values and the PIP plots showing the snps with PIP values scaled by effect size. The trick with this kind of stuff is that there's so many points, you want to be able to use ggplot and save them as a pdf so they work nicely in Adobe Illustrator but vectorizing all those points is a huge pain. So what I did was basically took the code from various tutorials (specifically the BSLMM one) and made it all work in ggplot, then I found this fun package called ggrastr that can rasterize some of the layers of a ggplot while leaving the rest as vectors. So this way you can rasterize the bulk of the points while allowing the rest to play nicely in a pdf format! Which is sick. So below I'll give an example of some of the code I used. The actual plotting code is in two files, bill_manhattan_plots_final.R and feather_manhattan_plots_final.R.
+
+## Manhattan plots
+Working with the feather data here.
+
+Libraries:
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(geiger)
+library(ggrepel)
+library(ggpubr) #I believe this is what allows you to do the ggarrange function and put this as a pdf, as opposed to ggsave which i think only does png
+library(data.table)
+library("ggnewscale") #this is an awesome little package that allows you to have multiple color scale functions without over-writting the previous ones
+library('ggrastr') #this is the package that allows you to rasterize some of the layer, downloading this can be kinda of a pain because you have to install to other things into your computer first that it relies on!
+```
+
+```{r}
+
+#starting with the big .assoc.txt file that was output from the lmm but post reordering to get chromosome level
+width <-read_delim("GCRF_feather_PC_ulmm_snps_ZFchr_assoc.txt",delim="\t") %>%  
+  mutate(outlier=if_else(p_wald<5e-8,"outlier","neutral")) 
+c <- width[order(as.numeric(width$ZFCHROM)),]
+c <- c %>% mutate(win_num = 1:nrow(c)) #this is important, is basically takes each snp and gives it a separate order number that is relative to all the others instead of relative to the chromosome of scaffold it's on, so it's 1-# of snps. Without this it's pretty tricky to plot
+
+c2 <- c[sample(nrow(c), size=200000, replace = F),] #I take a subsample of the data to actually plot initially because trying to get stuff to load with all 7mil snps just doesn't work, so you can figure out all the details with this sample as the background puoints (actual significant snps plotted separately) and then use the full version when saving as a pdf
+
+frequency <- table(c$ZFCHROM)
+start <- 1
+lab.pos<-vector()
+for (i in seq_along(frequency)){
+  size <- frequency[i]
+  txtpos <- start+size/2
+  lab.pos <- c(lab.pos, txtpos)
+  start <- start+size
+}
+#The above chunk of code is basically to set up where the labels will go, this allows the labels to be centered in the middle of the chromosome block
+
+specific_breaks <- lab.pos
+
+specific_labels <- c("1", "1A", "2", "3", "4", "4A", "5", "6", "7", 
+                     "8", "9", "10", "11", "12", "13", "14",
+                     " ", "16", " ", " ", "20", " ",
+                     " ", " ", " ", " ", " ", " ", "28",
+                     "Z", "LGE22", " ") 
+#Giving the chromosome labels, note that I leave some as blank because they get so cramped at the end that they overlap, so I removed some. The ticks will still be there but the labels will be readable.
+
+#The next chunk of code is setting up a separate spreadsheet with just the snps that are significant. I found this to be the easiest way to play with colors, control what's rasterized, change shapes and especially at gene labels.
+snps <- c("Scaffold_8__1_contigs__length_35685229.25471973","Scaffold_6__1_contigs__length_71876329.60198070","Scaffold_2__1_contigs__length_114774641.92336930",
+        "Scaffold_5__1_contigs__length_71959612.65589803","Scaffold_1__1_contigs__length_151072562.128626182","Scaffold_1__1_contigs__length_151072562.146593939",
+        "Scaffold_2__1_contigs__length_114774641.80634326","Scaffold_3__1_contigs__length_112408489.112330666","Scaffold_2__1_contigs__length_114774641.80634326",
+        "Scaffold_3__1_contigs__length_112408489.112330666","Scaffold_5__1_contigs__length_71959612.65589803","Scaffold_6__1_contigs__length_71876329.24616234",
+        "Scaffold_21__1_contigs__length_20640149.131805")
+trait <- c("BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","LMM","LMM","LMM","LMM","LMM")
+
+sig_snps <- c[c$rs %in% snps, ]
+sig_snps <- c[match(snps, c$rs), ]
+sig_snps$trait <- c("BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","BSLMM","LMM","LMM","LMM","LMM","LMM")
+sig_snps$annotated <- c("yes","no","yes", "yes","yes","no","no","yes","no","no","no","no","yes")
+sig_snps$gene <- c("RET",NA,"COL4A1;COL4A2","QRFPR","GABBR2",NA,NA,"LOC105760580",NA,"LOC105759048","QRFPR",NA,"PDIA3")
+
+#Here's the actual plotting!
+option2<-ggplot(c, aes(x = win_num, y = -log10(p_wald), color = as.factor(ZFCHROM))) + #make sure you set the chromosome values to a factor
+  rasterise(geom_point(alpha = 1, size = 1, shape = 19), dpi=300) + #note that these are the background dots, and what should be rasterized to get anything to work
+  geom_hline(yintercept = -log10(5e-8), linetype = "dashed", alpha = 0.8) + #adds dashed line for your significance threshold
+  scale_color_manual(values = rep(c("grey80", "grey40", "grey20"), 200)) + #changing the colors of the chromosome blocks
+  scale_x_continuous(breaks = specific_breaks, labels = specific_labels) + #add the chromosome labels
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 9)) + #this can get fiddled with to change the height of the graph, I like them to look a little stouter
+  guides(color = "none") + #this keeps it from trying to create a legend with the chromosome info
+  new_scale_color()+ #this allows the colors scales to coexist without removing the scale_color_manual above
+  geom_point(data = subset(sig_snps, trait == "BSLMM"), aes(x = win_num, y = -log10(p_wald), color = "BSLMM"), size = 2.7, shape=17) +
+  geom_point(data = subset(sig_snps, trait == "LMM"), aes(x = win_num, y = -log10(p_wald), color = "LMM"), size = 1.8) +
+  geom_label_repel(data=subset(sig_snps,annotated=="yes"), aes(x=win_num, y=-log10(p_wald), label=gene), size=3,
+                  segment.color = "black",segment.size = .2,
+                  min.segment.length = unit(0, 'lines'),nudge_y = .03,max.overlaps = 50)+ #this creates little boxed with lines that have the gene names in them, with a repel to keep them from overlapping
+  theme_classic() +
+  labs(x = "Chromosome", y = "-log10(p-value)") +
+  guides(color = guide_legend(override.aes = list(shape =c(17, 19)))) + #changed the legend to have different shapes from the BSLMM and LMM models
+  scale_color_manual(name = "Model",
+                     values = c("BSLMM" = "#A63C2E",
+                                "LMM" = "#C69D44"),
+                     breaks = c("BSLMM","LMM"),
+                     labels = c("BSLMM","LMM")) #specifying the colors and what the legend will say
+option2 #I only ever run this if the c2 (sample) data is being plotted, otherwise R just can't handle it and usually crashes
+
+#quick export for powerpoints and stuff
+png("~/Desktop/GCRF/GCRF-Present/files/results/figures/GCRF.feather_PC_labels.png", width=11.7, height=2.5, units="in", res=300)
+ggarrange(option2)
+dev.off()
+
+#proper export with pdf
+pdf("~/Desktop/GCRF/GCRF-Present/files/results/figures/GCRF.feather_all.assoc.newaxis.short.label.pdf", width=11.7, height=2.5)
+ggarrange(option2)
+dev.off()
+
+```
+
+## PIP plots
+Now I'll dig into the PIP plot. This one is tricky because it's nice to have a grey and white alternating background for the chromosome blocks. That took a while to figure out.
+
+```{r}
+#reading in the params function and adding the effect size column, this will be what decides how big to dots are later
+params<-fread("../bslmm/GCRF_featherPC_clean.chr1-31ZF.genotype.params.txt",header=T,sep="\t", data.table=F)
+params["eff"]<-abs(params$beta*params$gamma)
+
+# add linkage group column (chr)
+chr<-params$ZFCHROM
+
+# sort by linkage group and position
+params.sort<-params[order(as.numeric(params$ZFCHROM), params$ZFPOS),] %>% mutate(win_num = 1:nrow(params))
+
+#again taking a smaller sample to make the plotting easier while getting to a final version you like
+params.ss <- params.sort[sample(nrow(params.sort), size=200000, replace = F),]
+#write.table(params.sort, file="param.sort.txt", sep=" ", col.names = T, row.name=F)
+params.ss <- params.ss[order(as.numeric(params.ss$ZFCHROM)),] %>% mutate(win_num = 1:nrow(params.ss))
+
+# get list of linkage groups/chromosomes
+chrs<-sort(unique(as.numeric(chr)))
+
+# Loop over each chromosome
+frequency <- table(params.sort$ZFCHROM)
+start <- 1
+lab.pos<-vector()
+for (i in seq_along(frequency)){
+  size <- frequency[i]
+  txtpos <- start+size/2
+  lab.pos <- c(lab.pos, txtpos)
+  start <- start+size
+}
+#a similar set up here, getting the spacing for the blocks and the labels
+
+specific_breaks <- lab.pos
+specific_labels <- c("1", "1A", "2", "3", "4", "4A", "5", "6", "7", 
+                     "8", "9", "10", "11", "12", "13", "14",
+                     " ", "16", " ", " ", "20", " ",
+                     " ", " ", " ", " ", " ", " ", "28",
+                     "Z", "LGE22", " ") 
+
+chromosomes <- unique(params.sort$ZFCHROM)
+
+# Initialize an empty dataframe to store start and end values
+chromosome_ranges <- data.frame(chr = integer(), start = integer(), end = integer())
+
+# Loop through each chromosome; this is basically to set the beginning and end points for the alternating colors of boxes
+for (chromosome in chromosomes) {
+  # Calculate min and max win_num values for the current chromosome
+  min_win <- min(params.sort$win_num[params.sort$ZFCHROM == chromosome], na.rm = TRUE)
+  max_win <- max(params.sort$win_num[params.sort$ZFCHROM == chromosome], na.rm = TRUE)
+  
+  # Create a row with chromosome number, start, and end values
+  chromosome_row <- data.frame(chr = chromosome, start = min_win, end = max_win)
+  
+  # Append the row to the chromosome_ranges dataframe
+  chromosome_ranges <- rbind(chromosome_ranges, chromosome_row)
+}
+#okay not the most efficient manner but couldn't get ggplot to alternate so I forced it, one color for each chromsome block
+fill_colors <- c("lightgrey", "white", "lightgrey", "white", "lightgrey","white", "lightgrey",
+                 "white", "lightgrey","white", "lightgrey","white", "lightgrey","white", "lightgrey",
+                 "white", "lightgrey","white", "lightgrey","white", "lightgrey","white", "lightgrey",
+                 "white", "lightgrey","white", "lightgrey","white", "lightgrey","white", "lightgrey", "white")  # Add more colors as needed
+
+PIP1 <- ggplot() +
+  geom_rect(data = chromosome_ranges, aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf), fill = fill_colors, alpha = 1) +  # Add shaded regions for chromosomes
+  rasterize(geom_point(data=params.sort, aes(x = win_num, y = gamma, size = eff, fill = gamma >= 0.01), shape = 21), dpi=300) + #rasterize the bulk of the points, these are the nonsignificant background points
+  scale_fill_manual(values = c("FALSE" = "black", "TRUE" = "#B33019")) + #plot the significant points
+  scale_x_continuous(breaks = specific_breaks, labels = specific_labels) +
+  scale_size_continuous(range = c(2, 10)) +
+  theme_classic() +
+  labs(x = "Chromosome", y = "PIP")+
+  guides(size = guide_legend(title = "Effect Size"), fill = FALSE)  # Remove gamma value legend
+
+PIP1 #again, only run this if using the subsample dataframe
+
+pdf("~/Desktop/GCRF/GCRF-Present/files/results/figures/GCRF.feather_PIP.eff.pdf", width=11.7, height=2.5)
+ggarrange(PIP1)
+dev.off()
+```
+
 # CONCLUSION
 
 Alrighty! Congrats, you've run a GWAS. Now what do you do with all these outputs?? Well, I've got other stuff on my repository for that. Hopefully I'll get around to adding it here too but for now I'll just leave you with what I've written so far.
