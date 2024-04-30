@@ -39,9 +39,9 @@ I worked with samples from 89 individuals, and around 7.3 mil SNPs. Birds were c
 ## List of Scripts
 Script structure is as follows:
 I. Raw fastq file processing (including some of the pre-gwas workflow steps) *go in with specific file names*
-01. trimmomatic
-02. map reads BWA
-03. coverage
+1. trimmomatic
+2. map reads BWA
+3. coverage
 4.GATK.HapCall.sbatch
 5.GATK.GenDBIImport.sbatch
 6.GATK.Genotype.sbatch
