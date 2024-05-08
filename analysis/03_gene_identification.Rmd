@@ -1,0 +1,152 @@
+---
+title: "gene_identification"
+author: "Erica Robertson"
+date: "2024-05-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, Libraries}
+library(dplyr)
+library(tidyverse)
+```
+
+Generic commands for getting out the SNP bed files. Might be an easier way but this was simple enough...
+```{}
+cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E 
+"Scaffold_8__1_contigs__length_35685229.25471973|Scaffold_6__1_contigs__length_71876329.60198070|
+Scaffold_2__1_contigs__length_114774641.92336930|Scaffold_5__1_contigs__length_71959612.65589803|
+Scaffold_1__1_contigs__length_151072562.128626182|Scaffold_1__1_contigs__length_151072562.146593939|
+Scaffold_2__1_contigs__length_114774641.80634326|Scaffold_3__1_contigs__length_112408489.112330666" > 
+../new_input_files/snps/feather_PC_bslmm_snps.bed
+
+bedtools sort -i pen_num_snps.bed > pen_num_snps_sorted.bed
+
+bedtools closest -a pen_num_snps_sorted.bed -b 
+/scratch/alpine/ericacnr@colostate.edu/GCRF/Reference/ZEFI_annotation/Taeniopygia_guttata_sorted.bed 
+-d > pen_num_distance.bed
+```
+
+# FEATHER GENES
+
+```{r, feather}
+feather_traits <- c("pen_num", "plum_num", "pen_length", "plum_length", "nodes")
+
+#LMM
+for(trait in feather_traits) {
+  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_lmm_distance.bed"), sep="\t")
+  
+  trait_genes <- df %>% filter(df$V12 == "gene")
+  
+  threshold <- 100000
+  
+  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
+  close_genes <- trait_genes %>%
+    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+             (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
+             (V2 >= V6 & V2 <= V7))
+  
+  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+  
+  # Add column names
+  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+  
+  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+  
+  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+  
+  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_lmm_100kb.txt"), quote = FALSE, sep = "\t")
+}
+
+#BSLMM
+feather_traits <- c("pen_num", "plum_num", "pen_length", "plum_length", "nodes")
+
+for(trait in feather_traits) {
+  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_lmm_distance.bed"), sep="\t")
+  
+  trait_genes <- df %>% filter(df$V12 == "gene")
+  
+  threshold <- 100000
+  
+  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
+  close_genes <- trait_genes %>%
+    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+             (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
+             (V2 >= V6 & V2 <= V7))
+  
+  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+  
+  # Add column names
+  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+  
+  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+  
+  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+  
+  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_bslmm_100kb.txt"), quote = FALSE, sep = "\t")
+}
+```
+
+#BEAK GENES
+
+```{r, beak}
+beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length")
+
+
+#LMM
+for(trait in beak_traits) {
+  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_lmm_distance.bed"), sep="\t")
+  
+  trait_genes <- df %>% filter(df$V12 == "gene")
+  
+  threshold <- 100000
+  
+  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
+  close_genes <- trait_genes %>%
+    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+             (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
+             (V2 >= V6 & V2 <= V7))
+  
+  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+  
+  # Add column names
+  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+  
+  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+  
+  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+  
+  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_lmm_100kb.txt"), quote = FALSE, sep = "\t")
+}
+
+#BSLMM
+beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length")
+
+for(trait in beak_traits) {
+  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_bslmm_distance.bed"), sep="\t")
+  
+  trait_genes <- df %>% filter(df$V12 == "gene")
+  
+  threshold <- 100000
+  
+  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
+  close_genes <- trait_genes %>%
+    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+             (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
+             (V2 >= V6 & V2 <= V7))
+  
+  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+  
+  # Add column names
+  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+  
+  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+  
+  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+  
+  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_bslmm_100kb.txt"), quote = FALSE, sep = "\t")
+}
+```
