@@ -9,144 +9,216 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r, Libraries}
+```{r Libraries}
 library(dplyr)
 library(tidyverse)
 ```
 
 Generic commands for getting out the SNP bed files. Might be an easier way but this was simple enough...
-```{}
+```{generic_code}
 cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E 
-"Scaffold_8__1_contigs__length_35685229.25471973|Scaffold_6__1_contigs__length_71876329.60198070|
-Scaffold_2__1_contigs__length_114774641.92336930|Scaffold_5__1_contigs__length_71959612.65589803|
-Scaffold_1__1_contigs__length_151072562.128626182|Scaffold_1__1_contigs__length_151072562.146593939|
-Scaffold_2__1_contigs__length_114774641.80634326|Scaffold_3__1_contigs__length_112408489.112330666" > 
-../new_input_files/snps/feather_PC_bslmm_snps.bed
+"SNP_1|SNP_2" > 
+../new_input_files/snps/trait_model_snps.bed
 
-bedtools sort -i pen_num_snps.bed > pen_num_snps_sorted.bed
+bedtools sort -i trait_model_snps.bed > trait_model_snps_sorted.bed
 
-bedtools closest -a pen_num_snps_sorted.bed -b 
+bedtools closest -a trait_model_snps_sorted.bed -b 
 /scratch/alpine/ericacnr@colostate.edu/GCRF/Reference/ZEFI_annotation/Taeniopygia_guttata_sorted.bed 
--d > pen_num_distance.bed
+-d > trait_model_distance.bed
+```
+
+For loops to generate the actually commands used
+```{r lmm_commands}
+feather_traits <- c("pen_num", "pen_length", "plum_length", "plum_num", "nodes", "GCRF_feather_PC")
+for(trait in feather_traits) {
+  # Construct the file path
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/lmm/lmm_feather/", trait, "_outlier.txt")
+  
+  # Check if the file exists
+  if (file.exists(file_path)) {
+    # Read the significant SNPs from the file
+    sig_snps <- read.table(file_path, header = TRUE, sep = "\t") 
+    snp_names <- sig_snps[, 2]
+    
+    # Concatenate SNP names
+    concatenated_snps <- paste(snp_names, collapse = "|")
+    
+    # Construct the command
+    command <- paste0("cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E '", concatenated_snps, "' > ../new_input_files/snps/", trait, "_lmm_snps.bed")
+    
+    # Print the command
+    print(command)
+  } else {
+    # File does not exist, print a message and skip to the next trait
+    cat("File", file_path, "does not exist. Skipping trait:", trait, "\n")
+  }
+}
+
+beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length", "GCRF_bill_PC")
+for(trait in beak_traits) {
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/lmm/lmm_bill/", trait, "_outlier.txt")
+  if (file.exists(file_path)) {
+    sig_snps <- read.table(file_path, header = TRUE, sep = "\t") 
+    snp_names <- sig_snps[, 2]
+    concatenated_snps <- paste(snp_names, collapse = "|")
+    command <- paste0("cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E '", concatenated_snps, "' > ../new_input_files/snps/", trait, "_lmm_snps.bed")
+    print(command)
+  } else {
+    cat("File", file_path, "does not exist. Skipping trait:", trait, "\n")
+  }
+}
+```
+```{r bslmm_commands}
+feather_traits <- c("pen_num", "pen_length", "plum_length", "plum_num", "nodes", "GCRF_feather_PC")
+for(trait in beak_traits) {
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_bill/", trait, "_outlier.txt")
+  if (file.exists(file_path)) {
+    sig_snps <- read.table(file_path, header = TRUE, sep = "\t") 
+    snp_names <- sig_snps[, 2]
+    concatenated_snps <- paste(snp_names, collapse = "|")
+    command <- paste0("cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E '", concatenated_snps, "' > ../new_input_files/snps/", trait, "_bslmm_snps.bed")
+    print(command)
+  } else {
+    cat("File", file_path, "does not exist. Skipping trait:", trait, "\n")
+  }
+}
+
+beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length", "GCRF_bill_PC")
+for(trait in beak_traits) {
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_bill/", trait, "_outlier.txt")
+  if (file.exists(file_path)) {
+    sig_snps <- read.table(file_path, header = TRUE, sep = "\t") 
+    snp_names <- sig_snps[, 2]
+    concatenated_snps <- paste(snp_names, collapse = "|")
+    command <- paste0("cat GCRF.SNP.imputed_gt.ZFchr.sorted.bed | grep -E '", concatenated_snps, "' > ../new_input_files/snps/", trait, "_bslmm_snps.bed")
+    print(command)
+  } else {
+    cat("File", file_path, "does not exist. Skipping trait:", trait, "\n")
+  }
+}
+```
+
+For loops to run in the command line
+```{unix_commands}
+for trait in `ls *_snps.bed | rev | cut -d'_' -f2- | rev`; do echo $trait; bedtools sort -i "$trait"_snps.bed > "$trait"_snps_sorted.bed; done
+
+for trait in `ls *_sorted.bed | rev | cut -d'_' -f3- | rev`; do echo $trait; bedtools closest -a "$trait"_snps_sorted.bed -b /scratch/alpine/ericacnr@colostate.edu/GCRF/Reference/ZEFI_annotation/Taeniopygia_guttata_sorted.bed -d > "$trait"_distance.bed; done
 ```
 
 # FEATHER GENES
-
-```{r, feather}
-feather_traits <- c("pen_num", "plum_num", "pen_length", "plum_length", "nodes")
+```{r feather_filtering}
+feather_traits <- c("pen_num", "plum_num", "pen_length", "plum_length", "nodes", "GCRF_feather_PC")
 
 #LMM
 for(trait in feather_traits) {
-  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_lmm_distance.bed"), sep="\t")
+  # Construct the file path
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_lmm_distance.bed")
   
-  trait_genes <- df %>% filter(df$V12 == "gene")
-  
-  threshold <- 100000
-  
-  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
-  close_genes <- trait_genes %>%
-    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+  # Check if the file exists
+  if (file.exists(file_path)) {
+    # Read the table from the file
+    df <- read.table(file_path, sep = "\t")
+    
+    # Filter for genes
+    trait_genes <- df %>% filter(V12 == "gene")
+    
+    threshold <- 100000
+    
+    # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
+    close_genes <- trait_genes %>%
+      filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
              (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
              (V2 >= V6 & V2 <= V7))
-  
-  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
-  
-  # Add column names
-  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
-  
-  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
-  
-  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
-  
-  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_lmm_100kb.txt"), quote = FALSE, sep = "\t")
+    
+    # Separate the columns
+    df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+    
+    # Add column names
+    colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+    
+    # Combine data frames
+    close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+    
+    # Extract gene names
+    gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+    
+    # Write gene names to file
+    write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_genes_lmm_100kb.txt"), quote = FALSE, sep = "\t")
+  } else {
+    # Print a message if the file doesn't exist
+    cat("File", file_path, "does not exist.\n")
+  }
 }
 
 #BSLMM
-feather_traits <- c("pen_num", "plum_num", "pen_length", "plum_length", "nodes")
-
 for(trait in feather_traits) {
-  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_lmm_distance.bed"), sep="\t")
-  
-  trait_genes <- df %>% filter(df$V12 == "gene")
-  
-  threshold <- 100000
-  
-  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
-  close_genes <- trait_genes %>%
-    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_lmm_distance.bed")
+  if (file.exists(file_path)) {
+    df <- read.table(file_path, sep = "\t")
+    trait_genes <- df %>% filter(V12 == "gene")
+    threshold <- 100000
+    close_genes <- trait_genes %>%
+      filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
              (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
              (V2 >= V6 & V2 <= V7))
-  
-  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
-  
-  # Add column names
-  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
-  
-  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
-  
-  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
-  
-  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_bslmm_100kb.txt"), quote = FALSE, sep = "\t")
+    df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+    colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+    close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+    gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+    write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_genes_bslmm_100kb.txt"), quote = FALSE, sep = "\t")
+  } else {
+    # Print a message if the file doesn't exist
+    cat("File", file_path, "does not exist.\n")
+  }
 }
+
 ```
 
 #BEAK GENES
-
-```{r, beak}
-beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length")
-
+```{r beak_filtering}
+beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length", "GCRF_bill_PC")
 
 #LMM
 for(trait in beak_traits) {
-  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_lmm_distance.bed"), sep="\t")
-  
-  trait_genes <- df %>% filter(df$V12 == "gene")
-  
-  threshold <- 100000
-  
-  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
-  close_genes <- trait_genes %>%
-    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_lmm_distance.bed")
+  if (file.exists(file_path)) {
+    df <- read.table(file_path, sep = "\t")
+    trait_genes <- df %>% filter(V12 == "gene")
+    threshold <- 100000
+    close_genes <- trait_genes %>%
+      filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
              (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
              (V2 >= V6 & V2 <= V7))
-  
-  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
-  
-  # Add column names
-  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
-  
-  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
-  
-  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
-  
-  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_lmm_100kb.txt"), quote = FALSE, sep = "\t")
+    df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+    colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+    close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+    gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+    write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_genes_lmm_100kb.txt"), quote = FALSE, sep = "\t")
+  } else {
+    # Print a message if the file doesn't exist
+    cat("File", file_path, "does not exist.\n")
+  }
 }
 
 #BSLMM
-beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length")
-
 for(trait in beak_traits) {
-  df <- read.table(paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_bslmm_distance.bed"), sep="\t")
-  
-  trait_genes <- df %>% filter(df$V12 == "gene")
-  
-  threshold <- 100000
-  
-  # Filter for SNPs within 100000kb of gene start or stop, or inside the gene
-  close_genes <- trait_genes %>%
-    filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
+  file_path <- paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_lmm_distance.bed")
+  if (file.exists(file_path)) {
+    df <- read.table(file_path, sep = "\t")
+    trait_genes <- df %>% filter(V12 == "gene")
+    threshold <- 100000
+    close_genes <- trait_genes %>%
+      filter((V2 >= (V6 - threshold) & V2 <= (V6 + threshold)) |
              (V2 >= (V7 - threshold) & V2 <= (V7 + threshold)) |
              (V2 >= V6 & V2 <= V7))
-  
-  df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
-  
-  # Add column names
-  colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
-  
-  close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
-  
-  gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
-  
-  write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Present/GenomicPipeline/data/genes/", trait, "_genes_bslmm_100kb.txt"), quote = FALSE, sep = "\t")
+    df <- separate(close_genes, V14, into = paste0("V14_", 1:6), sep = "; ")
+    colnames(df)[grep("^V14_", colnames(df))] <- c("gene_id", "gene_version", "gene_name", "gene_source", "gene_biotype", "additional_info")
+    close_genes <- data.frame(close_genes[,1:13], df, close_genes$V15)
+    gene_names <- data.frame(close_genes$V4, close_genes$gene_id, close_genes$gene_name)
+    write.table(gene_names, paste0("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/", trait, "_genes_bslmm_100kb.txt"), quote = FALSE, sep = "\t")
+  } else {
+    # Print a message if the file doesn't exist
+    cat("File", file_path, "does not exist.\n")
+  }
 }
 ```
