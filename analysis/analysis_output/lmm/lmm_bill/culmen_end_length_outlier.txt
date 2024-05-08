@@ -1,0 +1,2 @@
+chr	rs	ps	n_miss	allele1	allele0	af	beta	se	logl_H1	l_remle	p_wald	outlier
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.39837818	39837818	0	A	G	0.284	-0.5156521	0.08441537	-56.8594	5.351816	4.635984e-08	outlier

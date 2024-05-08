@@ -1,0 +1,6 @@
+chr	rs	ps	n_miss	allele1	allele0	af	beta	se	logl_H1	l_remle	p_wald	outlier
+Scaffold_2__1_contigs__length_114774641	Scaffold_2__1_contigs__length_114774641.80634326	80634326	0	A	G	0.084	-2.053922	0.3355441	-130.3335	1e-05	3.90931e-08	outlier
+Scaffold_3__1_contigs__length_112408489	Scaffold_3__1_contigs__length_112408489.112330666	112330666	0	T	C	0.058	-2.299272	0.3646011	-129.5743	1e-05	1.796417e-08	outlier
+Scaffold_5__1_contigs__length_71959612	Scaffold_5__1_contigs__length_71959612.65589803	65589803	0	G	A	0.299	-1.30716	0.2096387	-129.8662	1e-05	2.422181e-08	outlier
+Scaffold_6__1_contigs__length_71876329	Scaffold_6__1_contigs__length_71876329.24616234	24616234	0	C	T	0.065	-2.886094	0.4637057	-129.9127	1e-05	2.540251e-08	outlier
+Scaffold_21__1_contigs__length_20640149	Scaffold_21__1_contigs__length_20640149.131805	131805	0	T	C	0.091	-2.138158	0.3501956	-130.397	1e-05	4.17209e-08	outlier

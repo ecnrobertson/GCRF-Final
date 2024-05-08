@@ -1,0 +1,9 @@
+chr	rs	ps	n_miss	allele1	allele0	af	beta	se	logl_H1	l_remle	p_wald	outlier
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.95671951	95671951	0	C	T	0.056	0.08155015	0.01340643	122.772	1e-05	4.112995e-08	outlier
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.149407156	149407156	0	T	G	0.056	0.09849156	0.01570853	123.5478	1e-05	1.857932e-08	outlier
+Scaffold_3__1_contigs__length_112408489	Scaffold_3__1_contigs__length_112408489.19386013	19386013	0	A	C	0.119	0.07061015	0.01168641	122.6038	1e-05	4.887584e-08	outlier
+Scaffold_3__1_contigs__length_112408489	Scaffold_3__1_contigs__length_112408489.49861818	49861818	0	G	A	0.05	0.1010484	0.01649196	122.9547	1e-05	3.410751e-08	outlier
+Scaffold_4__1_contigs__length_75720081	Scaffold_4__1_contigs__length_75720081.53108254	53108254	0	A	C	0.05	0.09130758	0.01496868	122.8422	1e-05	3.827593e-08	outlier
+Scaffold_4__1_contigs__length_75720081	Scaffold_4__1_contigs__length_75720081.60965510	60965510	0	A	T	0.106	0.06401969	0.01029279	123.3393	1e-05	2.300148e-08	outlier
+Scaffold_4__1_contigs__length_75720081	Scaffold_4__1_contigs__length_75720081.73659423	73659423	0	T	G	0.056	0.08980342	0.01421004	123.438	1.019268	1.502005e-08	outlier
+Scaffold_5__1_contigs__length_71959612	Scaffold_5__1_contigs__length_71959612.37338641	37338641	0	A	C	0.094	0.08091987	0.01331577	122.7476	1e-05	4.217179e-08	outlier
