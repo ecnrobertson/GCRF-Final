@@ -1,0 +1,5 @@
+chr	rs	ps	n_miss	alpha	beta	gamma
+Scaffold_2__1_contigs__length_114774641	Scaffold_2__1_contigs__length_114774641.68475368	68475368	0	2.512115e-07	0.01403911	0.011146
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.110665475	110665475	0	7.663224e-07	0.05734104	0.010594
+Scaffold_1__1_contigs__length_151072562	Scaffold_1__1_contigs__length_151072562.37796964	37796964	0	-6.876415e-07	-0.04289133	0.010522
+Scaffold_19__1_contigs__length_21238924	Scaffold_19__1_contigs__length_21238924.13416638	13416638	0	-1.794521e-06	-0.1279041	0.010458
