@@ -25,11 +25,11 @@ for (file in seq_along(gene_names)) {
 }
 
 #Same idea but for the bslmm
-bslmm_gene_list <- list.files(pattern="lmm_100kb.txt", full.names = TRUE)
-gene_names <- lapply(bslmm_gene_list, function(file) read.table(file, fill = TRUE, header=T, sep="\t"))
+bslmm_gene_list <- list.files(pattern="bslmm_100kb.txt", full.names = TRUE)
+bslmm_gene_names <- lapply(bslmm_gene_list, function(file) read.table(file, fill = TRUE, header=T, sep="\t"))
 
-for (file in seq_along(gene_names)) {
-  x <- gene_names[[file]]
+for (file in seq_along(bslmm_gene_names)) {
+  x <- bslmm_gene_names[[file]]
   gene_names_col <- x[, 3]
   for (row in 1:nrow(x)) {
     gene <- gene_names_col[row]
