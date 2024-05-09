@@ -1,0 +1,5 @@
+rs	gene_id	gene_name
+Scaffold_2__1_contigs__length_114774641.80634326	ENSTGUG00000010798	ensembl
+Scaffold_21__1_contigs__length_20640149.131805	ENSTGUG00000010220	PDIA3
+Scaffold_3__1_contigs__length_112408489.112330666	ENSTGUG00000002140	ensembl
+Scaffold_5__1_contigs__length_71959612.65589803	ENSTGUG00000001929	QRFPR

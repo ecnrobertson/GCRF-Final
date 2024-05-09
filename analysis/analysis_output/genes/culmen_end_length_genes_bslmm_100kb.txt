@@ -1,0 +1,2 @@
+rs	gene_id	gene_name
+1	Scaffold_1__1_contigs__length_151072562.39837818	ENSTGUG00000000374	ensembl

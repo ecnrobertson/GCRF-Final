@@ -1,0 +1,4 @@
+rs	gene_id	gene_name
+Scaffold_1__1_contigs__length_151072562.95671951	ENSTGUG00000003632	ensembl
+Scaffold_3__1_contigs__length_112408489.19386013	ENSTGUG00000012928	ensembl
+Scaffold_5__1_contigs__length_71959612.37338641	ENSTGUG00000006219	AADAT

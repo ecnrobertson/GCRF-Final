@@ -1,0 +1,2 @@
+rs	gene_id	gene_name
+Scaffold_2__1_contigs__length_114774641.60326738	ENSTGUG00000012174	FNDC3A

@@ -1,0 +1,16 @@
+plum_num_lmm_distance.bed
+test_gene_names.txt
+pen_num_lmm_distance.bed
+plum_num_bslmm_distance.bed
+pen_length_lmm_distance.bed
+pen_num_bslmm_distance.bed
+nare_length_bslmm_distance.bed
+pen_length_bslmm_distance.bed
+culmen_end_length_lmm_distance.bed
+culmen_end_length_bslmm_distance.bed
+GCRF_feather_PC_lmm_distance.bed
+beak_depth_bslmm_distance.bed
+beak_width_bslmm_distance.bed
+GCRF_bill_PC_lmm_distance.bed
+GCRF_feather_PC_bslmm_distance.bed
+GCRF_bill_PC_bslmm_distance.bed
