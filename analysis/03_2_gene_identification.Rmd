@@ -236,7 +236,7 @@ for(trait in beak_traits) {
 ```
 
 
-### Condensing into one dataframe
+### Condensing into one tidy dataframes
 ```{r}
 library(dplyr)
 # List all files matching the pattern
@@ -281,6 +281,93 @@ lmm_data <- lapply(lmm_gene_files, function(file) {
 })
 lmm_combined <- bind_rows(lmm_data)
 write_csv(lmm_combined, "~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/lmm_genes.csv")
+```
 
+## Big Master Sheet...
 
+```{r}
+bslmm_beak_files <- list.files(path="~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_beak/", pattern = "_pip01.dsv", full.names = TRUE)
+
+# Read each file, add trait column, and combine into a single data frame
+bslmm_beak <- lapply(bslmm_beak_files, function(file) {
+  trait <- gsub("_pip01\\.dsv", "", basename(file))
+  data <- read.table(file, fill = TRUE, header = TRUE, sep = "\t")
+  data$trait <- trait
+  return(data)
+})
+View(bslmm_beak)
+bslmm_beak_all <- bind_rows(bslmm_beak)
+bslmm_beak_all$model <- "bslmm"
+bslmm_beak_tidy <- bslmm_beak_all[,c(9,8,2)]
+View(bslmm_beak_tidy)
+
+bslmm_feather_files <- list.files(path="~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_feather/", pattern = "_pip01.dsv", full.names = TRUE)
+
+# Read each file, add trait column, and combine into a single data frame
+bslmm_feather <- lapply(bslmm_feather_files, function(file) {
+  trait <- gsub("_pip01\\.dsv", "", basename(file))
+  data <- read.table(file, fill = TRUE, header = TRUE, sep = "\t")
+  data$trait <- trait
+  return(data)
+})
+View(bslmm_feather)
+bslmm_feather_all <- bind_rows(bslmm_feather)
+bslmm_feather_all$model <- "bslmm"
+bslmm_feather_tidy <- bslmm_feather_all[,c(9,8,2)]
+View(bslmm_feather_tidy)
+
+bslmm_all <- rbind(bslmm_beak_tidy, bslmm_feather_tidy)
+
+write_csv(bslmm_all, "~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_snps.csv")
+```
+
+```{r}
+lmm_beak_files <- list.files(path="~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/lmm/lmm_bill/", pattern = "_outlier.txt", full.names = TRUE)
+
+# Read each file, add trait column, and combine into a single data frame
+lmm_beak <- lapply(lmm_beak_files, function(file) {
+  trait <- gsub("_outlier\\.txt", "", basename(file))
+  data <- read.table(file, fill = TRUE, header = TRUE, sep = "\t")
+  data$trait <- trait
+  return(data)
+})
+View(lmm_beak)
+lmm_beak_all <- bind_rows(lmm_beak)
+lmm_beak_all$model <- "lmm"
+lmm_beak_tidy <- lmm_beak_all[,c(15,14,2)]
+View(lmm_beak_tidy)
+
+lmm_feather_files <- list.files(path="~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/lmm/lmm_feather/", pattern = "_outlier.txt", full.names = TRUE)
+
+# Read each file, add trait column, and combine into a single data frame
+lmm_feather <- lapply(lmm_feather_files, function(file) {
+  trait <- gsub("_outlier\\.txt", "", basename(file))
+  data <- read.table(file, fill = TRUE, header = TRUE, sep = "\t")
+  data$trait <- trait
+  return(data)
+})
+View(lmm_feather)
+lmm_feather_all <- bind_rows(lmm_feather)
+lmm_feather_all$model <- "lmm"
+lmm_feather_tidy <- lmm_feather_all[,c(15,14,2)]
+View(lmm_feather_tidy)
+
+lmm_all <- rbind(lmm_beak_tidy, lmm_feather_tidy)
+
+write_csv(lmm_all, "~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/lmm/lmm_snps.csv")
+```
+
+```{r}
+lmm_all <- read.csv("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/lmm/lmm_snps.csv")
+bslmm_all <- read.csv("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_snps.csv")
+
+all_snps <- rbind(bslmm_all, lmm_all)
+
+lmm_genes <- read.csv("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/lmm_genes.csv")
+bslmm_genes <- read.csv("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/genes/bslmm_genes.csv")
+
+all_genes <- rbind(bslmm_genes, lmm_genes)
+
+master_snps <- merge(all_snps, all_genes[, c("rs", "gene_name")], by = "rs", all.x = TRUE)
+write.csv(master_snps, "~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/results_master.csv")
 ```
