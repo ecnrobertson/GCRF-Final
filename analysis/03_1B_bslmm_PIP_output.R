@@ -26,9 +26,9 @@ for(trait in feather_traits) {
 
 
 # BEAK ANALYSIS --------------------------------------------------------
-setwd("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_bill/")
-feather_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length", "GCRF_bill_PC")
-for(trait in feather_traits) {
+setwd("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/bslmm/bslmm_beak/")
+beak_traits <- c("beak_depth", "beak_width", "culmen_end_length", "nare_length", "GCRF_bill_PC")
+for(trait in beak_traits) {
   params<-fread(paste0(trait,".bslmm.param.txt"),header=T,sep="\t", data.table=F)
   params.pipsort<-params[order(-params$gamma),]
   pip01<-params.pipsort[params.pipsort$gamma>=0.01,]
