@@ -353,8 +353,8 @@ Now, most of the time you're going to be running GEMMA in a script but you'll ne
 Okay, so the relatedness matrix runs fine outside a script.
 
 ```{}
-/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile GCRF_bill_morpho \
-	-gk 1 -o GCRF_relate
+/projects/ericacnr@colostate.edu/GEMMA/bin/gemma -bfile feather_PC_fam1 \
+	-gk 1 -o fam1_relate
 
 ```
 
