@@ -23,3 +23,13 @@ for(trait in beak_traits) {
   out<-width %>% filter(outlier=="outlier")
   if (nrow(out)!= 0) write.table(out, file=paste0(trait,"_outlier.txt"),row.names=F,quote=F,sep="\t")
 }
+
+# POP LEVEL --------------------------------------------------------
+setwd("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/analysis_output_poplevel/lmm_poplevel/")
+beak_traits <- c("feather_PC_fam1", "feather_PC_fam2")
+for(trait in beak_traits) {
+  width <-read_delim(paste0(trait,".lmm.assoc.txt"),delim="\t") %>%  
+    mutate(outlier=if_else(p_wald<5e-8,"outlier","neutral"))
+  out<-width %>% filter(outlier=="outlier")
+  if (nrow(out)!= 0) write.table(out, file=paste0(trait,"_outlier.txt"),row.names=F,quote=F,sep="\t")
+}

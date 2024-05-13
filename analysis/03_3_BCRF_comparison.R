@@ -41,3 +41,18 @@ for (file in seq_along(bslmm_gene_names)) {
     print(gene)
   }
 }
+
+master_snps <- read.csv("~/Desktop/GCRF/GCRF-Final/analysis/analysis_output/results_master.csv")
+gene_names_col <- master_snps$gene_name
+for (row in 1:nrow(master_snps)) {
+    gene <- gene_names_col[row]
+    results <- grep(pattern = gene, x = BCRF_genes)
+    if (length(results) == 0) {
+      cat("Gene", gene, "not found in BCRF_genes.\n")
+      next  # Skip to the next iteration if gene is not found
+    }
+    print(gene)
+  }
+}
+
+grep("ADGB", BCRF_genes)
